@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PerformancePulse · 管理后台</title>
+  <link id="dynamicFavicon" rel="icon" href="/favicon.ico">
+  <style>
+    :root{--bg:#0f0f13;--s1:#1a1a22;--s2:#22222e;--s3:#2a2a38;--bd:#2e2e3e;--ac:#c8a97e;--ac2:#7c6af5;--tx:#e8e6f0;--mu:#6b6880;--err:#e05c5c;--ok:#5cb85c;--warn:#f0a030}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--tx)}
+    .wrap{max-width:1200px;margin:0 auto;padding:28px 20px 40px}
+    .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:16px}
+    .title{font-size:22px;font-weight:600}
+    .sub{font-size:12px;color:var(--mu)}
+    .btn{padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:none;font-family:inherit;transition:.2s;font-weight:500}
+    .btn-p{background:var(--ac);color:#1a0f00}
+    .btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--bd)}
+    .card{background:var(--s1);border:1px solid var(--bd);border-radius:14px;padding:18px;margin-bottom:14px}
+    .ct{font-size:12px;font-weight:600;color:var(--ac);margin-bottom:12px}
+    .fg{display:flex;flex-direction:column;gap:4px}
+    .fr{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+    .inp{padding:8px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:7px;color:var(--tx);font-size:12px;outline:none}
+    .tags{display:flex;flex-wrap:wrap;gap:6px}
+    .tag{background:var(--s2);border:1px solid var(--bd);border-radius:16px;padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px}
+    .tag-rm{cursor:pointer;color:var(--warn)}
+    .tag-add{display:flex;gap:8px;margin-top:8px}
+    .col-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+    .col-item{background:var(--s2);border:1px solid var(--bd);border-radius:12px;padding:10px}
+    .cih{font-size:12px;font-weight:600;margin-bottom:8px}
+    .clr{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
+    .clr input{padding:6px 8px;background:var(--s3);border:1px solid var(--bd);border-radius:7px;color:var(--tx);font-size:12px}
+    .bk-chk{background:var(--s2);border:1px solid var(--bd);border-radius:12px;font-size:12px;color:var(--tx)}
+    .toast{position:fixed;right:20px;bottom:20px;background:var(--s2);border:1px solid var(--bd);padding:10px 14px;border-radius:10px;font-size:12px;opacity:0;transform:translateY(10px);transition:.2s}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .toast.ok{border-color:rgba(92,184,92,.6)}
+    .toast.err{border-color:rgba(224,92,92,.6)}
+    .toast.warn{border-color:rgba(240,160,48,.6)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <div class="title">PerformancePulse · 管理后台</div>
+        <div class="sub">上传 Excel、配置人员与自定义筛选项</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-s" onclick="location.href='/performance'">前台视图</button>
+        <button class="btn btn-s" onclick="logout()">退出登录</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ct">⬆️ 数据上传</div>
+      <div class="fg" style="margin-bottom:10px">
+        <label>Excel 文件（.xls/.xlsx）</label>
+        <input class="inp" type="file" id="perfFile" accept=".xls,.xlsx" style="padding:6px">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-p" onclick="uploadPerformanceExcel()">上传并解析</button>
+        <span id="perfUploadStatus" style="font-size:12px;color:var(--mu)"></span>
+      </div>
+      <div id="formatWarningsWrap" style="display:none;margin-top:14px">
+        <div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px">⚠️ 发现格式问题，已正常解析但建议修正：</div>
+        <div id="formatWarningsList" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;scrollbar-width:none"></div>
+      </div>
+
+    </div>
+
+    <div class="card">
+      <div class="ct">⚙️ Excel 列配置</div>
+      <div class="fr">
+        <div class="fg">
+          <label>日期列（字母，如 B）</label>
+          <input class="inp" id="perfDateCol" placeholder="B">
+        </div>
+        <div class="fg">
+          <label>人员列（逗号分隔，如 C,D,E）</label>
+          <input class="inp" id="perfPeopleCols" placeholder="C,D">
+        </div>
+      </div>
+      <div class="fr" style="margin-top:8px">
+        <div class="fg">
+          <label>表头行（从 1 开始）</label>
+          <input class="inp" type="number" id="perfHeaderRow" value="1" min="1">
+        </div>
+        <div class="fg">
+          <label>人员列名（可选，逗号分隔，与人员列顺序一致）</label>
+          <input class="inp" id="perfPeopleNames" placeholder="员工A1号,员工A2号">
+        </div>
+      </div>
+      <button class="btn btn-s" style="margin-top:8px" onclick="savePerfExcelCfg()">保存配置</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">👥 人员管理</div>
+      <div class="tags" id="perfPeopleTags" style="min-height:40px"></div>
+      <div class="tag-add">
+        <input class="inp" type="text" id="perfPersonInput" placeholder="新增人员..." style="flex:1">
+        <button class="btn btn-p" onclick="addPerfPerson()">添加</button>
+      </div>
+      <div style="font-size:11px;color:var(--mu);margin-top:8px">勾选“可显示人员”用于前端筛选</div>
+      <div id="perfPeopleEnabled" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="savePerfPeople()">保存人员设置</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">🔖 自定义筛选项（关键词）</div>
+      <div class="fr">
+        <div class="fg">
+          <label>显示名称</label>
+          <input class="inp" id="filterName" placeholder="建模">
+        </div>
+        <div class="fg">
+          <label>关键词（从任务描述匹配）</label>
+          <input class="inp" id="filterKeyword" placeholder="建模">
+        </div>
+        <div class="fg">
+          <label>KPI 系数</label>
+          <input class="inp" id="filterKpi" placeholder="1">
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-p" onclick="addCustomFilter()">添加筛选项</button>
+        <span style="font-size:11px;color:var(--mu)">匹配任务描述，统计数量与 KPI 值</span>
+      </div>
+      <div id="customFilterList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
+      <button class="btn btn-s" style="margin-top:8px" onclick="saveCustomFilters()">保存筛选项</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">📊 Chart.js 资源地址</div>
+      <div class="fg">
+        <label>图表脚本 URL（用于前端加载 Chart.js）</label>
+        <input class="inp" id="chartJsUrl" placeholder="https://cdn.staticfile.net/Chart.js/3.9.1/chart.min.js">
+      </div>
+      <button class="btn btn-s" style="margin-top:8px" onclick="saveChartJsUrl()">保存 Chart.js 地址</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">🗂️ 前端模块顺序</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整前端各模块的显示顺序，保存后前台页面按此顺序排列</div>
+      <div id="moduleOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveModuleOrder()">保存模块顺序</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">📊 统计指标排序</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整顶部统计卡片的显示顺序</div>
+      <div id="statsOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveStatsOrder()">保存指标顺序</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">🎨 前端配色方案</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">设置前台默认使用的配色方案，访客可在前台右上角自行切换</div>
+      <div id="themePickerAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+      <button class="btn btn-s" onclick="saveDefaultTheme()">保存默认配色</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">✏️ 模块与图表标题</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">自定义前台各模块和图表的显示名称，留空则使用默认值</div>
+      <div id="titleEditorList" style="display:flex;flex-direction:column;gap:8px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveTitles()">保存标题</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">🔗 底部版权信息</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">可添加多条文本或链接，前台页面底部按顺序拼接显示</div>
+      <div id="footerItemList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+      <button class="btn btn-s" onclick="addFooterItem()">＋ 新增条目</button>
+      <button class="btn btn-p" style="margin-left:8px" onclick="saveFooterItems()">保存底部信息</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">🖼️ 网站图标（Favicon）</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:14px">支持本地上传（PNG / ICO / JPG / SVG 等）或填写外链 URL，本地上传后外链自动清空，反之亦然</div>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;min-width:80px">
+          <img id="faviconPreview" src="/favicon.ico" onerror="this.style.opacity='.15'"
+            style="width:48px;height:48px;object-fit:contain;border-radius:8px;border:1px solid var(--bd);background:var(--s2);padding:4px">
+          <span style="font-size:10px;color:var(--mu)" id="faviconSourceLabel">-</span>
+        </div>
+        <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:12px;color:var(--tx);font-weight:600">📁 本地上传</div>
+          <input type="file" id="faviconFileInput" accept=".png,.ico,.jpg,.jpeg,.gif,.svg,.webp"
+            style="font-size:12px;color:var(--tx)" onchange="previewFaviconFile(this)">
+          <button class="btn btn-s" onclick="uploadFavicon()">上传图片</button>
+        </div>
+        <div style="flex:2;min-width:220px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:12px;color:var(--tx);font-weight:600">🔗 外链 URL</div>
+          <input class="inp" id="faviconUrlInput" placeholder="https://example.com/icon.png"
+            oninput="previewFaviconUrl(this.value)">
+          <button class="btn btn-s" onclick="saveFaviconUrl()">保存外链</button>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-s" style="color:var(--err);border-color:var(--err)"
+          onclick="clearFavicon()">🗑 清除图标（恢复默认）</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ct">🔢 图表数据小数点位数</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">统一设置所有图表数据标签和数值的保留小数位数（0 = 整数）</div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <input class="inp" type="number" id="decimalPlaces" min="0" max="6" value="0" style="width:80px">
+        <span style="font-size:11px;color:var(--mu)">位小数</span>
+      </div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveDecimalPlaces()">保存小数位数</button>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let _perfCfg = {};
+
+    function toast(msg,type='ok'){
+      const t=document.getElementById('toast');
+      t.textContent=msg;t.className='toast show '+type;
+      setTimeout(()=>t.classList.remove('show'),3000);
+    }
+    function esc(s){return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  function formatQty(v) {
+    const n = Number(v);
+    if (Number.isNaN(n)) return v ?? '';
+    return Number.isInteger(n) ? n.toString() : n.toString();
+  }
+
+    // ── 统计指标排序 ─────────────────────────────────────────
+    const STAT_LABELS = {
+      'total_kpi': '📈 任务总量（KPI）',
+      'forecast':  '🔮 当月预测 KPI',
+      'people':    '👥 涉及人员',
+      'days':      '📅 涉及天数',
+    };
+    const STAT_KEYS = ['total_kpi', 'forecast', 'people', 'days'];
+    let _sStatDragSrc = null;
+
+    function renderStatsOrder() {
+      const order = (_perfCfg.app || {}).stats_order || STAT_KEYS;
+      const fullOrder = [...order];
+      STAT_KEYS.forEach(k => { if (!fullOrder.includes(k)) fullOrder.push(k); });
+      const wrap = document.getElementById('statsOrderList');
+      if (!wrap) return;
+      wrap.innerHTML = fullOrder.map((key, idx) => `
+        <div class="module-item" draggable="true" data-key="${key}"
+          style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+            background:var(--s2);border:1px solid var(--bd);border-radius:9px;
+            cursor:grab;user-select:none;transition:opacity .15s"
+          ondragstart="onSDragStart(event)" ondragover="onSDragOver(event)"
+          ondrop="onSDrop(event)" ondragend="onSDragEnd(event)">
+          <span style="color:var(--mu);font-size:14px">☰</span>
+          <span style="font-size:13px;color:var(--ac);min-width:20px;font-weight:600">${idx + 1}</span>
+          <span style="font-size:12px">${STAT_LABELS[key] || key}</span>
+        </div>
+      `).join('');
+    }
+
+    function onSDragStart(e) { _sStatDragSrc = e.currentTarget; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; }
+    function onSDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; return false; }
+    function onSDrop(e) {
+      e.stopPropagation();
+      const target = e.currentTarget;
+      if (_sStatDragSrc === target) return false;
+      const wrap = document.getElementById('statsOrderList');
+      const items = Array.from(wrap.children);
+      const si = items.indexOf(_sStatDragSrc), ti = items.indexOf(target);
+      if (si < ti) wrap.insertBefore(_sStatDragSrc, target.nextSibling);
+      else wrap.insertBefore(_sStatDragSrc, target);
+      Array.from(wrap.children).forEach((el, i) => { el.querySelector('span:nth-child(2)').textContent = i + 1; });
+      return false;
+    }
+    function onSDragEnd(e) { e.currentTarget.style.opacity = ''; _sStatDragSrc = null; }
+
+    async function saveStatsOrder() {
+      const wrap = document.getElementById('statsOrderList');
+      const order = Array.from(wrap.children).map(el => el.dataset.key);
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.stats_order = order;
+      const res = await fetch('/admin/performance/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app: { stats_order: order } })
+      });
+      if (res.ok) toast('指标顺序已保存'); else toast('保存失败', 'err');
+    }
+    // ─────────────────────────────────────────────────────────
+
+    const MODULE_LABELS = {
+      'kpi_trend':      '📈 KPI 总量趋势',
+      'filter_stats':   '📌 自定义筛选项 KPI 总览',
+      'client_kpi':     '🏢 甲方 KPI 走势',
+      'person_compare': '👤 人员 KPI 对比',
+      'daily_charts':   '📅 每日/月度/人员图表',
+      'detail_table':   '📋 明细表'
+    };
+    const MODULE_KEYS = ['kpi_trend', 'filter_stats', 'client_kpi', 'person_compare', 'daily_charts', 'detail_table'];
+
+    let _dragSrc = null;
+
+    function renderModuleOrder() {
+      const order  = (_perfCfg.app || {}).module_order   || MODULE_KEYS;
+      const hidden = new Set((_perfCfg.app || {}).hidden_modules || []);
+      const fullOrder = [...order];
+      MODULE_KEYS.forEach(k => { if (!fullOrder.includes(k)) fullOrder.push(k); });
+
+      const wrap = document.getElementById('moduleOrderList');
+      wrap.innerHTML = fullOrder.map((key, idx) => {
+        const isHidden = hidden.has(key);
+        return `
+        <div class="module-item" draggable="true" data-key="${key}" data-hidden="${isHidden ? '1' : '0'}"
+          style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+            background:var(--s2);border:1px solid ${isHidden ? 'var(--bd)' : 'var(--bd)'};
+            border-radius:9px;cursor:grab;user-select:none;transition:opacity .15s;
+            opacity:${isHidden ? '0.45' : '1'}"
+          ondragstart="onDragStart(event)" ondragover="onDragOver(event)"
+          ondrop="onDrop(event)" ondragend="onDragEnd(event)">
+          <span style="color:var(--mu);font-size:14px">☰</span>
+          <span style="font-size:13px;color:var(--ac);min-width:20px;font-weight:600">${idx + 1}</span>
+          <span style="font-size:12px;flex:1">${MODULE_LABELS[key] || key}</span>
+          <button onclick="toggleModuleVisible('${key}', event)"
+            style="background:none;border:1px solid var(--bd);border-radius:6px;
+              padding:2px 8px;cursor:pointer;font-size:13px;color:${isHidden ? 'var(--mu)' : 'var(--ac)'};
+              transition:color .15s" title="${isHidden ? '已隐藏，点击显示' : '点击隐藏'}">
+            ${isHidden ? '🙈' : '👁'}
+          </button>
+        </div>`;
+      }).join('');
+    }
+
+    function toggleModuleVisible(key, e) {
+      e.stopPropagation(); // 不触发拖拽
+      if (!_perfCfg.app) _perfCfg.app = {};
+      const hidden = new Set(_perfCfg.app.hidden_modules || []);
+      if (hidden.has(key)) hidden.delete(key); else hidden.add(key);
+      _perfCfg.app.hidden_modules = [...hidden];
+      renderModuleOrder();
+    }
+
+    function onDragStart(e) {
+      _dragSrc = e.currentTarget;
+      e.dataTransfer.effectAllowed = 'move';
+      e.currentTarget.style.opacity = '0.4';
+    }
+    function onDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      return false;
+    }
+    function onDrop(e) {
+      e.stopPropagation();
+      const target = e.currentTarget;
+      if (_dragSrc === target) return false;
+      const wrap = document.getElementById('moduleOrderList');
+      const items = Array.from(wrap.children);
+      const srcIdx = items.indexOf(_dragSrc);
+      const tgtIdx = items.indexOf(target);
+      if (srcIdx < tgtIdx) wrap.insertBefore(_dragSrc, target.nextSibling);
+      else wrap.insertBefore(_dragSrc, target);
+      // 更新序号显示
+      Array.from(wrap.children).forEach((el, i) => {
+        el.querySelector('span:nth-child(2)').textContent = i + 1;
+      });
+      return false;
+    }
+    function onDragEnd(e) {
+      e.currentTarget.style.opacity = '';
+      _dragSrc = null;
+    }
+
+    async function saveModuleOrder() {
+      const wrap = document.getElementById('moduleOrderList');
+      const order  = Array.from(wrap.children).map(el => el.dataset.key);
+      const hidden = Array.from(wrap.children)
+        .filter(el => el.dataset.hidden === '1')
+        .map(el => el.dataset.key);
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.module_order   = order;
+      _perfCfg.app.hidden_modules = hidden;
+      const res = await fetch('/admin/performance/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app: { module_order: order, hidden_modules: hidden } })
+      });
+      if (res.ok) toast('模块顺序已保存'); else toast('保存失败', 'err');
+    }
+
+    function renderFormatWarnings(warnings) {
+      const wrap = document.getElementById('formatWarningsWrap');
+      const list = document.getElementById('formatWarningsList');
+      if (!warnings || !warnings.length) {
+        wrap.style.display = 'none';
+        return;
+      }
+      wrap.style.display = '';
+      list.innerHTML = warnings.map(w => `
+        <div style="background:var(--s2);border:1px solid rgba(240,160,48,.3);border-radius:9px;padding:9px 12px">
+          <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:5px;flex-wrap:wrap">
+            <span style="font-size:10px;color:var(--mu)">第 ${w.row} 行</span>
+            <span style="font-size:11px;font-weight:600;color:var(--ac)">${esc(w.person)}</span>
+            <span style="font-size:10px;color:var(--mu)">${w.date}</span>
+          </div>
+          <div style="font-size:11px;color:var(--mu);background:var(--s3);border-radius:6px;padding:5px 8px;margin-bottom:6px;word-break:break-all">${esc(w.text)}</div>
+          ${w.issues.map(i => `<div style="font-size:11px;color:var(--warn);display:flex;align-items:flex-start;gap:5px"><span style="opacity:.7;flex-shrink:0">▸</span>${esc(i)}</div>`).join('')}
+        </div>
+      `).join('');
+    }
+
+    async function loadPerformanceAdmin() {
+      _perfCfg = await fetch('/admin/performance/config').then(r => r.json()).catch(() => ({}));
+      const excel = _perfCfg.excel || {};
+      document.getElementById('perfDateCol').value = excel.date_col || 'B';
+      document.getElementById('perfPeopleCols').value = (excel.people_cols || ['C']).join(',');
+      document.getElementById('perfHeaderRow').value = excel.header_row || 1;
+      document.getElementById('perfPeopleNames').value = (excel.people_names || []).join(',');
+      document.getElementById('chartJsUrl').value = (_perfCfg.app || {}).chart_js_url || '';
+      document.getElementById('decimalPlaces').value = (_perfCfg.app || {}).decimal_places ?? 0;
+      // 初始化当前选中主题（只在加载时设，之后由 selectAdminTheme 更新）
+      _selectedAdminTheme = (_perfCfg.app || {}).default_theme || 'dark';
+      renderPerfPeople();
+      renderCustomFilters();
+      renderStatsOrder();
+      renderModuleOrder();
+      renderAdminThemePicker();
+      renderTitleEditor();
+      renderFooterEditor();
+      initFaviconEditor();
+    }
+
+    function renderPerfPeople() {
+      const people = _perfCfg.people || [];
+      const enabled = _perfCfg.people_enabled || [];
+      const tags = document.getElementById('perfPeopleTags');
+      tags.innerHTML = people.map(p => `
+        <span class="tag">${esc(p)} <span class="tag-rm" onclick="removePerfPerson('${p}')">×</span></span>
+      `).join('');
+      const enabledWrap = document.getElementById('perfPeopleEnabled');
+      enabledWrap.innerHTML = people.map(p => `
+        <label class="bk-chk" style="padding:4px 8px">
+          <input type="checkbox" ${enabled.includes(p) ? 'checked' : ''}
+            onchange="togglePerfPerson('${p}',this.checked)"> 可显示：${esc(p)}
+        </label>
+      `).join('');
+    }
+
+    function addPerfPerson() {
+      const inp = document.getElementById('perfPersonInput');
+      const v = (inp.value || '').trim();
+      if (!v) return;
+      _perfCfg.people = Array.from(new Set([...( _perfCfg.people || [] ), v]));
+      if (!_perfCfg.people_enabled) _perfCfg.people_enabled = [];
+      if (!_perfCfg.people_enabled.includes(v)) _perfCfg.people_enabled.push(v);
+      inp.value = '';
+      renderPerfPeople();
+      renderPerfKpiTables();
+    }
+
+    function removePerfPerson(name) {
+      _perfCfg.people = (_perfCfg.people || []).filter(p => p !== name);
+      _perfCfg.people_enabled = (_perfCfg.people_enabled || []).filter(p => p !== name);
+      renderPerfPeople();
+      renderPerfKpiTables();
+    }
+
+    function togglePerfPerson(name, on) {
+      const list = new Set(_perfCfg.people_enabled || []);
+      if (on) list.add(name); else list.delete(name);
+      _perfCfg.people_enabled = [...list];
+    }
+
+    let _fDragSrc = null;
+
+    function renderCustomFilters() {
+      const list = _perfCfg.custom_filters || [];
+      const wrap = document.getElementById('customFilterList');
+      if (!wrap) return;
+      if (!list.length) {
+        wrap.innerHTML = '<div style="font-size:12px;color:var(--mu)">暂无自定义筛选项</div>';
+        return;
+      }
+      wrap.innerHTML = list.map((f, idx) => `
+        <div class="cf-item" draggable="true" data-idx="${idx}"
+          ondragstart="onFDragStart(event)" ondragover="onFDragOver(event)"
+          ondrop="onFDrop(event)" ondragend="onFDragEnd(event)"
+          style="display:grid;grid-template-columns:18px 1fr 1fr 90px auto auto;gap:8px;align-items:center;
+            padding:4px 6px;border-radius:8px;border:1px solid transparent;transition:border-color .12s,background .12s">
+          <span style="color:var(--mu);cursor:grab;text-align:center;font-size:13px;user-select:none">☰</span>
+          <input class="inp" data-f="name"    value="${esc(f.name    || '')}" oninput="syncCF(this)">
+          <input class="inp" data-f="keyword" value="${esc(f.keyword || '')}" oninput="syncCF(this)">
+          <input class="inp" data-f="kpi"     value="${f.kpi ?? 1}"           oninput="syncCF(this)" style="width:100%">
+          <label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer;white-space:nowrap">
+            <input type="checkbox" data-f="enabled" ${f.enabled ? 'checked' : ''} onchange="syncCF(this)">启用
+          </label>
+          <button class="btn btn-s" onclick="removeCustomFilter(${idx})">删除</button>
+        </div>
+      `).join('');
+    }
+
+    // 从 DOM 行同步字段到数据（不依赖固定 idx，拖拽后依然正确）
+    function syncCF(el) {
+      const row = el.closest('.cf-item');
+      if (!row) return;
+      const idx = parseInt(row.dataset.idx);
+      const f = (_perfCfg.custom_filters || [])[idx];
+      if (!f) return;
+      const field = el.dataset.f;
+      if (field === 'enabled') f[field] = el.checked;
+      else if (field === 'kpi') f[field] = parseFloat(el.value) || 1;
+      else f[field] = el.value;
+    }
+
+    // 拖拽：与模块顺序拖拽完全独立的变量和函数
+    function onFDragStart(e) {
+      _fDragSrc = e.currentTarget;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => { if (_fDragSrc) _fDragSrc.style.opacity = '0.4'; }, 0);
+    }
+    function onFDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.style.borderColor = 'var(--ac)';
+      e.currentTarget.style.background  = 'rgba(200,169,126,.07)';
+      return false;
+    }
+    function onFDrop(e) {
+      e.stopPropagation();
+      const target = e.currentTarget;
+      target.style.borderColor = 'transparent';
+      target.style.background  = '';
+      if (!_fDragSrc || _fDragSrc === target) return false;
+      const wrap = document.getElementById('customFilterList');
+      const items = Array.from(wrap.querySelectorAll('.cf-item'));
+      const si = items.indexOf(_fDragSrc);
+      const ti = items.indexOf(target);
+      if (si < ti) wrap.insertBefore(_fDragSrc, target.nextSibling);
+      else          wrap.insertBefore(_fDragSrc, target);
+      // 同步 _perfCfg.custom_filters 的顺序
+      const newItems = Array.from(wrap.querySelectorAll('.cf-item'));
+      const orig = _perfCfg.custom_filters.slice();
+      _perfCfg.custom_filters = newItems.map(el => orig[parseInt(el.dataset.idx)]);
+      // 重置 data-idx 和删除按钮 onclick
+      newItems.forEach((el, i) => {
+        el.dataset.idx = i;
+        const btn = el.querySelector('button');
+        if (btn) btn.setAttribute('onclick', `removeCustomFilter(${i})`);
+      });
+      return false;
+    }
+    function onFDragEnd(e) {
+      if (_fDragSrc) { _fDragSrc.style.opacity = ''; }
+      // 清除所有悬停高亮
+      document.querySelectorAll('.cf-item').forEach(el => {
+        el.style.borderColor = 'transparent';
+        el.style.background  = '';
+      });
+      _fDragSrc = null;
+    }
+
+    function addCustomFilter() {
+      const name = document.getElementById('filterName').value.trim();
+      const keyword = document.getElementById('filterKeyword').value.trim();
+      const kpi = parseFloat(document.getElementById('filterKpi').value) || 1;
+      if (!name || !keyword) { toast('请输入显示名称与关键词','err'); return; }
+      if (!_perfCfg.custom_filters) _perfCfg.custom_filters = [];
+      _perfCfg.custom_filters.push({name, keyword, kpi, enabled: true});
+      document.getElementById('filterName').value = '';
+      document.getElementById('filterKeyword').value = '';
+      document.getElementById('filterKpi').value = '';
+      renderCustomFilters();
+    }
+
+    function removeCustomFilter(idx) {
+      if (!_perfCfg.custom_filters) return;
+      _perfCfg.custom_filters.splice(idx, 1);
+      renderCustomFilters();
+    }
+
+    async function saveCustomFilters() {
+      const res = await fetch('/admin/performance/config', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ custom_filters: _perfCfg.custom_filters || [] })
+      });
+      if (res.ok) toast('筛选项已保存'); else toast('保存失败','err');
+    }
+
+    async function saveChartJsUrl() {
+      const url = document.getElementById('chartJsUrl').value.trim();
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.chart_js_url = url;
+      const res = await fetch('/admin/performance/config', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ app: { chart_js_url: url } })
+      });
+      if (res.ok) toast('Chart.js 地址已保存'); else toast('保存失败','err');
+    }
+
+    async function savePerfExcelCfg() {
+      const excel = {
+        date_col: document.getElementById('perfDateCol').value.trim() || 'A',
+        people_cols: document.getElementById('perfPeopleCols').value.split(',').map(s => s.trim()).filter(Boolean),
+        header_row: parseInt(document.getElementById('perfHeaderRow').value) || 1,
+        people_names: document.getElementById('perfPeopleNames').value.split(',').map(s => s.trim()).filter(Boolean)
+      };
+      const res = await fetch('/admin/performance/config', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ excel })
+      });
+      if (res.ok) toast('Excel 配置已保存'); else toast('保存失败','err');
+    }
+
+    async function uploadPerformanceExcel() {
+      const fileInp = document.getElementById('perfFile');
+      const st = document.getElementById('perfUploadStatus');
+      if (!fileInp.files[0]) { toast('请选择 Excel 文件','err'); return; }
+      const fd = new FormData();
+      fd.append('file', fileInp.files[0]);
+      st.textContent = '上传解析中...';
+      const res = await fetch('/admin/performance/upload', {method:'POST', body:fd});
+      const d = await res.json();
+      if (d.success) {
+        st.textContent = `合并成功：${d.count} 条记录（${d.date_range || ''}）`;
+        // 上传路由已维护好 people 表，直接重新加载配置刷新显示，不在前端写人员
+        _perfCfg = await fetch('/admin/performance/config').then(r => r.json()).catch(() => _perfCfg);
+        renderPerfPeople();
+        renderFormatWarnings(d.format_warnings || []);
+        toast(d.format_warnings && d.format_warnings.length
+          ? `上传成功，${d.format_warnings.length} 处格式问题`
+          : '上传成功',
+          d.format_warnings && d.format_warnings.length ? 'warn' : 'ok');
+      } else {
+        st.textContent = d.error || '上传失败';
+        renderFormatWarnings(d.format_warnings || []);
+        toast(d.error || '上传失败', 'err');
+      }
+      fileInp.value = '';
+    }
+
+    async function logout() {
+      await fetch('/admin/logout', {method:'POST'});
+      location.href = '/admin/login';
+    }
+
+    // ── 配色方案（后台选择默认主题） ─────────────────────────
+    const THEMES_DEF = [
+      { key:'dark',    label:'暗金',   vars:'--bg:#0f0f13;--s1:#1a1a22;--s2:#22222e;--s3:#2a2a38;--bd:#2e2e3e;--ac:#c8a97e;--ac2:#7c6af5;--tx:#e8e6f0;--mu:#6b6880' },
+      { key:'navy',    label:'深海蓝', vars:'--bg:#0a0f1e;--s1:#111827;--s2:#1e2a3a;--s3:#263347;--bd:#2d3f55;--ac:#60a5fa;--ac2:#a78bfa;--tx:#e2e8f0;--mu:#64748b' },
+      { key:'forest',  label:'深林绿', vars:'--bg:#0a130d;--s1:#111c14;--s2:#1a2b1d;--s3:#223826;--bd:#2d4a32;--ac:#4ade80;--ac2:#34d399;--tx:#e2ede4;--mu:#5a7a5e' },
+      { key:'rose',    label:'玫瑰红', vars:'--bg:#130a0f;--s1:#1f1118;--s2:#2d1a22;--s3:#3a2230;--bd:#4f2d3e;--ac:#fb7185;--ac2:#f472b6;--tx:#fce7f3;--mu:#9d6b7e' },
+      { key:'light',   label:'明亮',   vars:'--bg:#f4f4f8;--s1:#ffffff;--s2:#f0f0f5;--s3:#e8e8ef;--bd:#d8d8e4;--ac:#7c5cbf;--ac2:#4f8ef5;--tx:#1a1a2e;--mu:#7070a0' },
+    ];
+
+    let _selectedAdminTheme = '';
+
+    function renderAdminThemePicker() {
+      const wrap = document.getElementById('themePickerAdmin');
+      if (!wrap) return;
+      wrap.innerHTML = THEMES_DEF.map(t => {
+        const ac = t.vars.match(/--ac:([^;]+)/)?.[1] || '#c8a97e';
+        const s1 = t.vars.match(/--s1:([^;]+)/)?.[1] || '#1a1a22';
+        const isActive = _selectedAdminTheme === t.key;
+        return `<div onclick="selectAdminTheme('${t.key}')" id="adminTheme_${t.key}"
+          style="cursor:pointer;border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:8px;
+            border:2px solid ${isActive ? ac : 'var(--bd)'};background:${s1};transition:all .15s">
+          <div style="width:14px;height:14px;border-radius:50%;background:${ac};flex-shrink:0"></div>
+          <span style="font-size:12px;color:${ac}">${t.label}</span>
+          ${isActive ? '<span style="font-size:10px;color:var(--mu)">默认</span>' : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function selectAdminTheme(key) {
+      _selectedAdminTheme = key;
+      renderAdminThemePicker();
+    }
+
+    async function saveDefaultTheme() {
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.default_theme = _selectedAdminTheme;
+      await _saveAppCfg();
+      toast('默认配色已保存');
+    }
+
+    // ── 模块与图表标题 ──────────────────────────────────────
+    const TITLE_FIELDS = [
+      { key:'page_title',          label:'页面标题',                    def:'PerformancePulse 绩效图表' },
+      { key:'page_subtitle',       label:'页面副标题',                  def:'按人员/时间维度分析' },
+      { key:'mod_kpi_trend',       label:'KPI总量趋势 · 模块标题',      def:'KPI 总量趋势' },
+      { key:'mod_filter_stats',    label:'自定义筛选项 · 模块标题',     def:'自定义筛选项 KPI 总览' },
+      { key:'mod_filter_raw',      label:'自定义筛选项 · 图表①原始数量趋势', def:'原始数量趋势' },
+      { key:'mod_filter_client_raw', label:'自定义筛选项 · 图表②甲方占比（原始）', def:'甲方占比（原始）' },
+      { key:'mod_filter_kpi',      label:'自定义筛选项 · 图表③KPI值趋势',  def:'KPI 值趋势' },
+      { key:'mod_filter_client_kpi', label:'自定义筛选项 · 图表④甲方占比（KPI）',  def:'甲方占比（KPI）' },
+      { key:'mod_person_compare',  label:'人员对比 · 模块标题',         def:'人员 KPI 对比' },
+      { key:'mod_daily_charts',    label:'日常图表 · 图表-每日任务量',  def:'每日任务量' },
+      { key:'mod_monthly_charts',  label:'日常图表 · 图表-月度任务量',  def:'月度任务量' },
+      { key:'mod_person_charts',   label:'日常图表 · 图表-人员任务量',  def:'人员任务量' },
+      { key:'mod_detail_table',    label:'明细表 · 模块标题',           def:'明细表' },
+    ];
+
+    function renderTitleEditor() {
+      const wrap = document.getElementById('titleEditorList');
+      if (!wrap) return;
+      const titles = (_perfCfg.app || {}).titles || {};
+      wrap.innerHTML = TITLE_FIELDS.map(f => `
+        <div style="display:grid;grid-template-columns:180px 1fr;gap:8px;align-items:center">
+          <label style="font-size:11px;color:var(--mu)">${esc(f.label)}</label>
+          <input class="inp" id="titleField_${f.key}" placeholder="${esc(f.def)}" value="${esc(titles[f.key] || '')}">
+        </div>
+      `).join('');
+    }
+
+    async function saveTitles() {
+      const titles = {};
+      TITLE_FIELDS.forEach(f => {
+        const v = (document.getElementById('titleField_' + f.key)?.value || '').trim();
+        if (v) titles[f.key] = v;
+      });
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.titles = titles;
+      await _saveAppCfg();
+      toast('标题已保存');
+    }
+
+    // ── 网站图标 ─────────────────────────────────────────────
+    function initFaviconEditor() {
+      const cfg = (_perfCfg.app || {});
+      const url = cfg.favicon_url || '';
+      const urlInput = document.getElementById('faviconUrlInput');
+      const label    = document.getElementById('faviconSourceLabel');
+      const preview  = document.getElementById('faviconPreview');
+      if (urlInput) urlInput.value = url;
+      if (url) {
+        if (label) label.textContent = '外链';
+        if (preview) { preview.src = url; preview.style.opacity = '1'; }
+      } else {
+        // 检查是否有本地文件
+        const img = new Image();
+        img.onload  = () => { if (preview) { preview.src = '/api/app/favicon'; preview.style.opacity = '1'; } if (label) label.textContent = '本地文件'; };
+        img.onerror = () => { if (preview) preview.style.opacity = '.15'; if (label) label.textContent = '未设置'; };
+        img.src = '/api/app/favicon?' + Date.now();
+      }
+    }
+
+    function previewFaviconFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const preview = document.getElementById('faviconPreview');
+      if (preview) { preview.src = URL.createObjectURL(file); preview.style.opacity = '1'; }
+    }
+
+    function previewFaviconUrl(url) {
+      const preview = document.getElementById('faviconPreview');
+      if (!preview || !url) return;
+      const img = new Image();
+      img.onload  = () => { preview.src = url; preview.style.opacity = '1'; };
+      img.onerror = () => { preview.style.opacity = '.15'; };
+      img.src = url;
+    }
+
+    async function uploadFavicon() {
+      const input = document.getElementById('faviconFileInput');
+      if (!input?.files[0]) { toast('请先选择图片文件', 'err'); return; }
+      const fd = new FormData();
+      fd.append('file', input.files[0]);
+      const res = await fetch('/admin/upload/favicon', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { toast(data.error || '上传失败', 'err'); return; }
+      // 更新预览
+      const preview  = document.getElementById('faviconPreview');
+      const label    = document.getElementById('faviconSourceLabel');
+      const urlInput = document.getElementById('faviconUrlInput');
+      if (preview) { preview.src = '/api/app/favicon?' + Date.now(); preview.style.opacity = '1'; }
+      if (label)   label.textContent = '本地文件';
+      if (urlInput) urlInput.value = '';
+      if (!_perfCfg.app) _perfCfg.app = {};
+      delete _perfCfg.app.favicon_url;
+      // 同步浏览器标签图标
+      const link = document.getElementById('dynamicFavicon');
+      if (link) link.href = '/api/app/favicon?' + Date.now();
+      toast('图标上传成功');
+    }
+
+    async function saveFaviconUrl() {
+      const url = (document.getElementById('faviconUrlInput')?.value || '').trim();
+      if (!url) { toast('请填写外链 URL', 'err'); return; }
+      const res = await fetch('/admin/upload/favicon-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      if (!res.ok) { toast('保存失败', 'err'); return; }
+      const preview = document.getElementById('faviconPreview');
+      const label   = document.getElementById('faviconSourceLabel');
+      if (preview) { preview.src = url; preview.style.opacity = '1'; }
+      if (label)   label.textContent = '外链';
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.favicon_url = url;
+      const link = document.getElementById('dynamicFavicon');
+      if (link) link.href = url;
+      toast('外链图标已保存');
+    }
+
+    async function clearFavicon() {
+      if (!confirm('确认清除自定义图标，恢复浏览器默认？')) return;
+      // 清除本地文件
+      await fetch('/admin/upload/favicon-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: '' })
+      });
+      const preview  = document.getElementById('faviconPreview');
+      const label    = document.getElementById('faviconSourceLabel');
+      const urlInput = document.getElementById('faviconUrlInput');
+      const fileInput = document.getElementById('faviconFileInput');
+      if (preview)   { preview.src = '/favicon.ico?' + Date.now(); preview.style.opacity = '.15'; }
+      if (label)     label.textContent = '未设置';
+      if (urlInput)  urlInput.value = '';
+      if (fileInput) fileInput.value = '';
+      if (!_perfCfg.app) _perfCfg.app = {};
+      delete _perfCfg.app.favicon_url;
+      const link = document.getElementById('dynamicFavicon');
+      if (link) link.href = '/favicon.ico?' + Date.now();
+      toast('已清除自定义图标');
+    }
+    // ─────────────────────────────────────────────────────────
+
+    // ── 底部版权信息 ─────────────────────────────────────────
+    function renderFooterEditor() {
+      const wrap = document.getElementById('footerItemList');
+      if (!wrap) return;
+      const items = (_perfCfg.app || {}).footer_items || [];
+      if (!items.length) { wrap.innerHTML = '<div style="font-size:12px;color:var(--mu)">暂无条目，点击「新增条目」添加</div>'; return; }
+      wrap.innerHTML = items.map((it, i) => `
+        <div style="display:flex;gap:8px;align-items:center" id="footerRow_${i}">
+          <input class="inp" style="flex:2;font-size:12px" placeholder="显示文本（必填）"
+            id="footerText_${i}" value="${esc(it.text || '')}">
+          <input class="inp" style="flex:3;font-size:12px" placeholder="链接 URL（选填）"
+            id="footerUrl_${i}" value="${esc(it.url || '')}">
+          <button class="btn btn-s" style="padding:4px 10px;font-size:12px;flex-shrink:0"
+            onclick="removeFooterItem(${i})">删除</button>
+        </div>
+      `).join('');
+    }
+
+    function addFooterItem() {
+      if (!_perfCfg.app) _perfCfg.app = {};
+      if (!_perfCfg.app.footer_items) _perfCfg.app.footer_items = [];
+      _perfCfg.app.footer_items.push({ text: '', url: '' });
+      renderFooterEditor();
+      // 聚焦最新一行的文本输入
+      const idx = _perfCfg.app.footer_items.length - 1;
+      setTimeout(() => document.getElementById('footerText_' + idx)?.focus(), 50);
+    }
+
+    function removeFooterItem(i) {
+      if (!_perfCfg.app?.footer_items) return;
+      _perfCfg.app.footer_items.splice(i, 1);
+      renderFooterEditor();
+    }
+
+    async function saveFooterItems() {
+      const wrap = document.getElementById('footerItemList');
+      if (!wrap) return;
+      const items = [];
+      let i = 0;
+      while (document.getElementById('footerText_' + i) !== null) {
+        const text = (document.getElementById('footerText_' + i)?.value || '').trim();
+        const url  = (document.getElementById('footerUrl_'  + i)?.value || '').trim();
+        if (text) items.push(url ? { text, url } : { text });
+        i++;
+      }
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.footer_items = items;
+      const res = await fetch('/admin/performance/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app: { footer_items: items } })
+      });
+      if (res.ok) { renderFooterEditor(); toast('底部信息已保存'); }
+      else toast('保存失败', 'err');
+    }
+
+    // ── 小数位数 ─────────────────────────────────────────────
+    async function saveDecimalPlaces() {
+      const v = parseInt(document.getElementById('decimalPlaces').value) || 0;
+      if (!_perfCfg.app) _perfCfg.app = {};
+      _perfCfg.app.decimal_places = Math.max(0, Math.min(6, v));
+      await _saveAppCfg();
+      toast('小数位数已保存');
+    }
+
+    // ── 通用保存app配置 ──────────────────────────────────────
+    async function _saveAppCfg() {
+      const res = await fetch('/admin/performance/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app: _perfCfg.app || {} })
+      });
+      if (!res.ok) toast('保存失败', 'err');
+    }
+
+    // ── 保存人员设置 ─────────────────────────────────────────
+    async function savePerfPeople() {
+      const res = await fetch('/admin/performance/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          people: _perfCfg.people || [],
+          people_enabled: _perfCfg.people_enabled || []
+        })
+      });
+      if (res.ok) toast('人员设置已保存'); else toast('保存失败', 'err');
+    }
+
+    loadPerformanceAdmin();
+  </script>
+</body>
+</html>

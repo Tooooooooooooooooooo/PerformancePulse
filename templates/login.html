@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PerformancePulse · 管理员登录</title>
+  <style>
+    :root{--bg:#0f0f13;--s1:#1a1a22;--s2:#22222e;--s3:#2a2a38;--bd:#2e2e3e;--ac:#c8a97e;--tx:#e8e6f0;--mu:#6b6880;--err:#e05c5c}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{background:var(--s1);border:1px solid var(--bd);border-radius:16px;padding:28px;max-width:360px;width:100%}
+    .title{font-size:20px;font-weight:600;margin-bottom:6px}
+    .sub{font-size:12px;color:var(--mu);margin-bottom:18px}
+    .fg{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+    .fg label{font-size:11px;color:var(--mu)}
+    .inp{padding:9px 10px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;outline:none}
+    .btn{width:100%;padding:9px;border-radius:8px;border:none;background:var(--ac);font-weight:600;cursor:pointer;font-size:12px;color:#1a0f00}
+    .err{color:var(--err);font-size:11px;margin-top:8px;min-height:14px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">PerformancePulse</div>
+    <div class="sub">管理后台登录</div>
+    <div class="fg">
+      <label>用户名</label>
+      <input class="inp" id="username" placeholder="admin">
+    </div>
+    <div class="fg">
+      <label>密码</label>
+      <input class="inp" id="password" type="password" placeholder="admin123">
+    </div>
+    <button class="btn" onclick="login()">登录</button>
+    <div class="err" id="error"></div>
+  </div>
+
+  <script>
+    async function login() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const res = await fetch('/admin/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      const data = await res.json();
+      if (data.success) {
+        location.href = '/admin';
+      } else {
+        document.getElementById('error').textContent = data.error || '登录失败';
+      }
+    }
+  </script>
+</body>
+</html>
