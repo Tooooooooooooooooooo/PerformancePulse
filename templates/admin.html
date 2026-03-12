@@ -69,6 +69,19 @@
     </div>
 
     <div class="card">
+      <div class="ct">🔍 数据规范检查</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">扫描数据库中已入库的全部记录，列出书写不规范的条目</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-p" onclick="runFormatCheck()">开始检查</button>
+        <span id="fmtCheckStatus" style="font-size:12px;color:var(--mu)"></span>
+      </div>
+      <div id="fmtCheckResult" style="display:none">
+        <div id="fmtCheckSummary" style="font-size:12px;margin-bottom:10px"></div>
+        <div id="fmtCheckList" style="display:flex;flex-direction:column;gap:8px;max-height:480px;overflow-y:auto;scrollbar-width:none"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="ct">⚙️ Excel 列配置</div>
       <div class="fr">
         <div class="fg">
@@ -609,6 +622,54 @@
         body: JSON.stringify({ excel })
       });
       if (res.ok) toast('Excel 配置已保存'); else toast('保存失败','err');
+    }
+
+    async function runFormatCheck() {
+      const btn    = event.target;
+      const status = document.getElementById('fmtCheckStatus');
+      const result = document.getElementById('fmtCheckResult');
+      const summary = document.getElementById('fmtCheckSummary');
+      const list   = document.getElementById('fmtCheckList');
+      btn.disabled = true;
+      status.textContent = '检查中…';
+      result.style.display = 'none';
+      try {
+        const res  = await fetch('/api/performance/format-check');
+        if (res.status === 401) { toast('登录已过期，请刷新页面重新登录', 'err'); return; }
+        const data = await res.json();
+        const { warnings, total, issue_count } = data;
+        status.textContent = `共扫描 ${total} 条，发现 ${issue_count} 条不规范`;
+        status.style.color = issue_count > 0 ? 'var(--warn)' : 'var(--ok)';
+        result.style.display = '';
+
+        if (!issue_count) {
+          summary.innerHTML = '<span style="color:var(--ok)">✅ 全部记录书写规范，未发现问题</span>';
+          list.innerHTML = '';
+        } else {
+          summary.innerHTML = `<span style="color:var(--warn)">⚠️ 发现 ${issue_count} 条不规范记录，建议在源文件中修正后重新上传</span>`;
+          list.innerHTML = warnings.map(w => `
+            <div style="background:var(--s2);border:1px solid var(--bd);border-left:3px solid var(--warn);
+              border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7">
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+                <span style="color:var(--mu)">${w.date}</span>
+                <span style="color:var(--ac);font-weight:600">${esc(w.person)}</span>
+                ${w.client ? `<span style="color:var(--ac2)">${esc(w.client)}</span>` : ''}
+              </div>
+              <div style="color:var(--tx);margin-bottom:6px;word-break:break-all">
+                ${esc(w.task_desc)}${w.quantity && w.quantity !== 1 ? ` × ${w.quantity}${esc(w.unit)}` : ''}
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px">
+                ${w.issues.map(i => `<span style="color:var(--warn)">• ${esc(i)}</span>`).join('')}
+              </div>
+            </div>
+          `).join('');
+        }
+      } catch(e) {
+        status.textContent = '检查失败：' + e.message;
+        status.style.color = 'var(--err)';
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     async function uploadPerformanceExcel() {

@@ -16,7 +16,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'performance-pulse-secret')
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(_BASE, 'data')
+# 优先用环境变量；否则尝试在项目目录建 data/，失败则用 /tmp（Railway 只读文件系统）
+DATA_DIR = os.environ.get('DATA_DIR') or os.path.join(_BASE, 'data')
 DB_PATH = os.path.join(DATA_DIR, 'performance_pulse.db')
 
 EXCEL_DEFAULT = {
@@ -38,7 +39,18 @@ def get_db():
 
 
 def init_db():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    global DATA_DIR, DB_PATH
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        # 测试可写
+        _test = os.path.join(DATA_DIR, '.write_test')
+        open(_test, 'w').close()
+        os.remove(_test)
+    except OSError:
+        # 文件系统只读（如 Railway），改用 /tmp
+        DATA_DIR = '/tmp/pp_data'
+        DB_PATH   = os.path.join(DATA_DIR, 'performance_pulse.db')
+        os.makedirs(DATA_DIR, exist_ok=True)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -449,6 +461,9 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get('logged_in'):
+            # API 路由返回 JSON 401，页面路由重定向到登录页
+            if request.path.startswith('/api/') or                request.headers.get('Accept', '').find('application/json') >= 0:
+                return jsonify({'error': '未登录，请先登录管理后台'}), 401
             return redirect('/admin/login')
         return f(*args, **kwargs)
     return decorated
@@ -877,6 +892,84 @@ def api_performance_summary():
     return resp
 
 
+@app.route('/api/performance/format-check')
+def api_format_check():
+    """扫描数据库中已入库的记录，检测书写不规范的条目"""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT pr.id, pr.task_desc, pr.quantity, pr.unit, pr.client,
+                   pr.date, p.name AS person
+            FROM performance_records pr
+            JOIN people p ON pr.person_id = p.id
+            ORDER BY pr.date DESC, p.name
+        """).fetchall()
+
+    warnings = []
+    for row in rows:
+        # 把数据库里的 task_desc 还原成原始格式检查
+        # task_desc 已是单条解析结果，重新构建原始文本做检查
+        raw = row['task_desc']
+        if row['quantity'] and row['quantity'] != 1:
+            raw = f"{raw}{'×' if row['unit'] else '*'}{int(row['quantity']) if row['quantity'] == int(row['quantity']) else row['quantity']}{row['unit'] or ''}"
+        chunks = [raw]
+
+        issues = []
+        text = row['task_desc']
+        unit = (row['unit'] or '').strip()
+        client = (row['client'] or '').strip()
+        qty = row['quantity']
+
+        # 1. 全角连字符
+        if re.search(r'[－—–]', text):
+            issues.append('客户与任务之间使用了全角连字符（应使用半角 -）')
+
+        # 2. 乘号使用英文 x/X
+        if re.search(r'(?:^|[^a-zA-Z])[xX](?=\d)|(?<=\d)[xX](?=[^a-zA-Z]|$)', text):
+            issues.append('数量乘号使用了英文字母 x/X（应使用 × 或 *）')
+
+        # 3. 任务描述为空
+        if not text.strip():
+            issues.append('任务描述为空')
+
+        # 4. 单位不规范（非空但不在标准列表）
+        std_units = {'张', '个', '次', '套', '小时', ''}
+        if unit and unit not in std_units:
+            issues.append(f'非标准单位「{unit}」（标准：张/个/次/套/小时）')
+
+        # 5. client 与 task_desc 中出现全角符号分隔
+        full_text = (client + '-' + text) if client else text
+        if re.search(r'[，、]', full_text):
+            issues.append('描述中含全角逗号或顿号（建议使用半角）')
+
+        # 6. task_desc 中含疑似多任务混写（换行/分号未拆分）
+        if re.search(r'[;；\n]', text):
+            issues.append('任务描述中含分隔符（可能是多条任务未拆分）')
+
+        # 7. 未提取到甲方（client 为空，且 task_desc 中不含 - 分隔符）
+        if not client and '-' not in text:
+            issues.append('未提取到甲方（格式应为「甲方-任务描述」）')
+
+        # 8. 有数量但无单位（quantity > 1 说明原始数据写了数字，但单位为空）
+        if qty and qty != 1 and not unit:
+            issues.append(f'数量为 {int(qty) if qty == int(qty) else qty} 但未填写单位')
+
+
+
+        if issues:
+            warnings.append({
+                'id':     row['id'],
+                'date':   row['date'],
+                'person': row['person'],
+                'client': row['client'] or '',
+                'task_desc': row['task_desc'],
+                'quantity': row['quantity'],
+                'unit':   row['unit'] or '',
+                'issues': issues
+            })
+
+    return jsonify({'warnings': warnings, 'total': len(rows), 'issue_count': len(warnings)})
+
+
 @app.route('/api/performance/export', methods=['POST'])
 def api_performance_export():
     body = request.json or {}
@@ -919,4 +1012,6 @@ def api_performance_export():
 init_db()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(host='0.0.0.0', port=port, debug=debug)
