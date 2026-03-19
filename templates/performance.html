@@ -104,19 +104,24 @@
 
     <div class="card" id="insightCard" style="margin-bottom:14px">
       <div class="ct">🧭 趋势解读</div>
-      <div id="trendLine" style="font-size:13px;color:var(--tx);margin-bottom:10px">-</div>
+      <div id="trendLine" style="font-size:11px;color:var(--mu);margin-bottom:10px"></div>
       <div style="font-size:11px;color:var(--mu);margin-bottom:8px">📊 对比视图：本月 vs 上月、今年 vs 去年同月</div>
-      <div class="stats" id="compareStats" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px"></div>
+      <div class="stats" id="compareStats" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px"></div>
     </div>
 
     <!-- KPI 总量趋势（独立模块） -->
     <div class="card" id="kpiTrendCard" style="display:none">
       <div class="ct">📈 KPI 总量趋势</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <span style="font-size:11px;color:var(--mu)" id="overallKpiTitle">自定义筛选项 · 按日期分布</span>
-        <button class="btn btn-s" id="btnToggleTotalKpi" onclick="toggleTotalKpiLine()" style="font-size:11px;padding:4px 10px;opacity:.75">显示总KPI走势</button>
+      <div id="overallKpiTagsWrap" style="display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:3;min-width:240px">
+          <canvas class="chart-wrap" id="overallKpiChart" style="height:220px;max-height:220px"></canvas>
+        </div>
+        <div style="flex:1;min-width:160px;max-width:220px" id="overallKpiPieWrap">
+          <div style="font-size:11px;color:var(--mu);margin-bottom:6px;text-align:center">KPI 占比</div>
+          <canvas id="overallKpiPieChart" style="width:100%;height:220px;max-height:220px;display:block"></canvas>
+        </div>
       </div>
-      <canvas class="chart-wrap" id="overallKpiChart" style="height:220px;max-height:220px"></canvas>
     </div>
 
     <div class="card" id="customFilterCard" style="display:none">
@@ -173,12 +178,8 @@
       <div id="personCompareEmpty" style="font-size:12px;color:var(--mu);padding:8px 0">从上方点击人名开始对比</div>
     </div>
 
-    <!-- 每日/月度/人员图表 -->
-    <div class="charts" id="dailyChartsBlock">
-      <div class="chart-card">
-        <div class="chart-title" id="ctDayChart">每日任务量</div>
-        <canvas class="chart-wrap" id="chartDay"></canvas>
-      </div>
+    <!-- 月度/人员任务量/人员KPI占比图表 -->
+    <div class="charts" id="dailyChartsBlock" style="margin-bottom:14px">
       <div class="chart-card">
         <div class="chart-title" id="ctMonthChart">月度任务量</div>
         <canvas class="chart-wrap" id="chartMonth"></canvas>
@@ -186,6 +187,10 @@
       <div class="chart-card">
         <div class="chart-title" id="ctPersonChart">人员任务量</div>
         <canvas class="chart-wrap" id="chartPerson"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title" id="ctPersonKpiPieChart">人员KPI占比</div>
+        <canvas class="chart-wrap" id="chartPersonKpiPie"></canvas>
       </div>
     </div>
 
@@ -326,22 +331,26 @@
     let _chartTitles = {};
     function ct(key, def) { return _chartTitles[key] || def; }
 
-    let perfData = null;       // 当前筛选后的数据
-    let allPerfData = null;    // 全量数据（不受筛选影响，人员对比专用）
+    let perfData = null;         // 人员+时间筛选
+    let allPerfData = null;      // 无筛选（全量）
+    let personFilterData = null; // 仅人员筛选（不含时间）→ 月度任务量
+    let timeFilterData = null;   // 仅时间筛选（不含人员）→ 人员任务量/KPI占比
     let chartDay = null;
     let chartMonth = null;
     let chartTask = null;
     let chartPerson = null;
+    let chartPersonKpiPie = null;
     let chartCustom = null;
     let chartCustomKpi = null;
     let chartCustomClient = null;
     let chartCustomClientKpi = null;
     let chartOverallKpi = null;
+    let chartOverallKpiPie = null;
     let activeCustomFilter = '';
     let totalKpiLineVisible = false;
     let selectedPersons = [];
     let _statsOrder = ['total_kpi', 'task_progress', 'forecast', 'people', 'days', 'absent_days']; // 默认顺序
-    let selectedClients = null;   // null = 全选，Set = 部分选中
+    let selectedClients = null;   // null = 全部，string = 单选甲方名
     let chartClientKpi = null;
     let chartClientKpiPie = null;       // 当前已选中的人员列表
     let chartPersonCompare = null;  // 人员对比图实例
@@ -382,12 +391,24 @@
       if (to) params.append('to', to);
       // 时间戳防浏览器缓存
       const bust = Date.now();
-      const [res, resAll] = await Promise.all([
+      // 仅人员参数（月度任务量用）
+      const personParams = new URLSearchParams();
+      if (person) personParams.append('person', person);
+      // 仅时间参数（人员任务量/KPI占比用）
+      const timeParams = new URLSearchParams();
+      if (from) timeParams.append('from', from);
+      if (to)   timeParams.append('to', to);
+
+      const [res, resAll, resPerson, resTime] = await Promise.all([
         fetch(`/api/performance/summary?${params.toString()}&_=${bust}`),
-        fetch(`/api/performance/summary?_=${bust}`)
+        fetch(`/api/performance/summary?_=${bust}`),
+        fetch(`/api/performance/summary?${personParams.toString()}&_=${bust}`),
+        fetch(`/api/performance/summary?${timeParams.toString()}&_=${bust}`)
       ]);
-      perfData    = await res.json();
-      allPerfData = await resAll.json();
+      perfData         = await res.json();
+      allPerfData      = await resAll.json();
+      personFilterData = await resPerson.json();
+      timeFilterData   = await resTime.json();
       // 每次拉数据后同步最新配置（小数位、筛选项等后台改动立即生效）
       const appCfg = (allPerfData.config || {}).app || {};
       if (typeof appCfg.decimal_places !== 'undefined') {
@@ -445,22 +466,23 @@
       const trendCard = document.getElementById('kpiTrendCard');
       const wrap = document.getElementById('customFilterStats');
       const list = perfData.filter_totals || [];
-      const allRecords = (allPerfData || perfData).records || [];
+      const allRecords = (perfData || allPerfData).records || [];
       const hasRecords = allRecords.length > 0;
 
-      // 自定义筛选项总览：仅有筛选项时显示
-      if (list.length && !isAdminHidden('customFilterCard')) {
+      // 自定义筛选项总览：仅有筛选项时显示；过滤掉无数据（kpi_value=0）的指标
+      const visibleList = list.filter(item => (Number(item.kpi_value) || 0) > 0);
+      if (visibleList.length && !isAdminHidden('customFilterCard')) {
         card.style.display = '';
-        wrap.innerHTML = list.map(item => `
+        wrap.innerHTML = visibleList.map(item => `
           <div class="stat" data-filter="${item.name.replace(/"/g,'&quot;')}" style="cursor:pointer" onclick="selectCustomFilter('${item.name.replace(/'/g,"\\'")}')">
             <div class="sv">${item.quantity}${item.unit || ''}</div>
             <div class="sl">${item.name}${item.unit ? '（单位：'+item.unit+'）' : ''}</div>
             <div class="sl" style="margin-top:4px">KPI：${item.kpi_value}（系数 ${item.kpi_factor}）</div>
           </div>
         `).join('');
-        // 如果之前恢复的activeCustomFilter不在当前筛选项里，重置为第一个
-        if (!activeCustomFilter || !list.find(f => f.name === activeCustomFilter)) {
-          activeCustomFilter = list[0].name;
+        // 如果之前恢复的activeCustomFilter不在当前可见筛选项里，重置为第一个
+        if (!activeCustomFilter || !visibleList.find(f => f.name === activeCustomFilter)) {
+          activeCustomFilter = visibleList[0].name;
         }
         highlightFilterStat(activeCustomFilter);
         totalKpiLineVisible = false;
@@ -495,23 +517,33 @@
       }
     }
 
+    // ── KPI 总量趋势：单选按钮 ──────────────────────────────
+    let _overallKpiSelected = null; // null = 全部；'__total__' = KPI合计；string = 单选项名
+    const _KPI_TOTAL_KEY = '__total__';
+
     function renderOverallKpiChart() {
-      const list = perfData.filter_totals || [];
+      const list      = perfData.filter_totals || [];
       const seriesMap = perfData.filter_series || {};
-      const ctx = document.getElementById('overallKpiChart');
-      const titleEl = document.getElementById('overallKpiTitle');
-      const toggleBtn = document.getElementById('btnToggleTotalKpi');
+      const ctx       = document.getElementById('overallKpiChart');
+      const tagsWrap  = document.getElementById('overallKpiTagsWrap');
+      const pieWrap   = document.getElementById('overallKpiPieWrap');
       if (!ctx) return;
 
-      const palette = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6'];
-      let dates = [], subDatasets = [];
+      const palette = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6','#a78bfa','#34d399'];
 
-      if (list.length) {
-        if (titleEl) titleEl.textContent = '各筛选项 KPI 趋势';
+      let labels = [];
+      let dates  = [];
+      let allDatasets = [];
+      let hasPie = false; // only show pie when filter items exist
+
+      const visibleList = list.filter(f => (Number(f.kpi_value) || 0) > 0);
+      if (visibleList.length) {
+        hasPie = true;
         const dateSet = new Set();
-        list.forEach(f => { (seriesMap[f.name]?.kpi || []).forEach(p => dateSet.add(p.date)); });
-        dates = Array.from(dateSet).sort();
-        subDatasets = list.map((f, i) => {
+        visibleList.forEach(f => { (seriesMap[f.name]?.kpi || []).forEach(p => dateSet.add(p.date)); });
+        dates  = Array.from(dateSet).sort();
+        labels = visibleList.map(f => f.name);
+        allDatasets = visibleList.map((f, i) => {
           const kpiMap = {};
           (seriesMap[f.name]?.kpi || []).forEach(p => { kpiMap[p.date] = p.value; });
           return {
@@ -524,12 +556,12 @@
           };
         });
       } else {
-        if (titleEl) titleEl.textContent = '全员 KPI 趋势';
         const records = (allPerfData || perfData).records || [];
         const dateSet = new Set(records.map(r => r.date));
-        dates = Array.from(dateSet).sort();
+        dates  = Array.from(dateSet).sort();
         const persons = [...new Set(records.map(r => r.person))].sort();
-        subDatasets = persons.map((p, i) => {
+        labels = persons;
+        allDatasets = persons.map((p, i) => {
           const pm = {};
           records.filter(r => r.person === p).forEach(r => {
             pm[r.date] = (pm[r.date] || 0) + (Number(r.kpi_value) || 0);
@@ -545,14 +577,20 @@
         });
       }
 
-      if (!dates.length) { chartOverallKpi && chartOverallKpi.destroy(); return; }
+      if (!dates.length) {
+        chartOverallKpi && chartOverallKpi.destroy();
+        chartOverallKpiPie && chartOverallKpiPie.destroy();
+        if (tagsWrap) tagsWrap.innerHTML = '';
+        if (pieWrap) pieWrap.style.display = 'none';
+        return;
+      }
 
-      // 总KPI线（每日所有分项叠加）
+      // ── KPI合计数据集（所有分项按日期叠加）────────────────────
       const totalData = dates.map((dt, di) =>
-        subDatasets.reduce((s, ds) => s + (Number(ds.data[di]) || 0), 0)
+        allDatasets.reduce((s, ds) => s + (Number(ds.data[di]) || 0), 0)
       );
-      const totalDs = {
-        label: '总 KPI',
+      const totalDataset = {
+        label: 'KPI合计',
         data: totalData,
         borderColor: '#ffffff',
         backgroundColor: 'rgba(255,255,255,.08)',
@@ -564,20 +602,48 @@
         fill: false
       };
 
-      // totalKpiLineVisible=false：显示分项（默认）
-      // totalKpiLineVisible=true：只显示总KPI
-      const finalDatasets = totalKpiLineVisible
-        ? [totalDs]
-        : [...subDatasets, totalDs];
+      // 校正 selected
+      const validKeys = [null, _KPI_TOTAL_KEY, ...labels];
+      if (!validKeys.includes(_overallKpiSelected)) _overallKpiSelected = null;
 
-      // 更新按钮文字
-      if (toggleBtn) {
-        toggleBtn.style.display = '';
-        toggleBtn.textContent = totalKpiLineVisible ? '显示分项明细' : '隐藏分项明细';
-        toggleBtn.style.opacity = totalKpiLineVisible ? '.65' : '1';
+      // ── 单选按钮组（全部 + KPI合计 + 各分项）─────────────────
+      if (tagsWrap) {
+        const makeBtn = (key, label, color, isSolid) => {
+          const active = _overallKpiSelected === key;
+          const safeName = key === null ? 'null' : `'${String(key).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}' `;
+          const borderC  = active ? (color || 'var(--ac)') : 'var(--bd)';
+          const bgC      = active ? (color ? color + '22' : 'rgba(200,169,126,.18)') : 'var(--s2)';
+          const textC    = active ? (color || 'var(--ac)') : 'var(--mu)';
+          const dot      = active ? '● ' : '';
+          const extraStyle = isSolid ? '' : 'border-style:dashed;';
+          return `<span onclick="selectOverallKpi(${safeName})" style="
+            cursor:pointer;display:inline-flex;align-items:center;padding:4px 12px;
+            border-radius:20px;font-size:12px;font-weight:500;user-select:none;transition:all .15s;
+            border:1.5px solid ${borderC};${extraStyle}
+            background:${bgC};color:${textC}">${dot}${label}</span>`;
+        };
+
+        tagsWrap.innerHTML =
+          makeBtn(null, '全部', null, true) +
+          makeBtn(_KPI_TOTAL_KEY, 'KPI合计', '#ffffff', false) +
+          allDatasets.map((ds, i) => makeBtn(ds.label, ds.label, palette[i % palette.length], true)).join('');
       }
 
-      const overallLabelPlugin = {
+      // ── 决定折线图展示的数据集 ─────────────────────────────────
+      let finalDatasets;
+      if (_overallKpiSelected === null) {
+        // 全部：各分项 + KPI合计虚线
+        finalDatasets = [...allDatasets, totalDataset];
+      } else if (_overallKpiSelected === _KPI_TOTAL_KEY) {
+        // 仅KPI合计
+        finalDatasets = [totalDataset];
+      } else {
+        // 单选某分项
+        finalDatasets = allDatasets.filter(ds => ds.label === _overallKpiSelected);
+      }
+
+      // ── 折线图数据标签插件 ────────────────────────────────────
+      const labelPlugin = {
         id: 'overallLabelPlugin',
         afterDatasetsDraw(chart) {
           const { ctx } = chart;
@@ -585,16 +651,15 @@
           chart.data.datasets.forEach((dataset, di) => {
             const meta = chart.getDatasetMeta(di);
             if (meta.hidden) return;
-            const isTotal = dataset.label === '总 KPI';
-            ctx.font = isTotal ? 'bold 10px Noto Sans SC,sans-serif' : '9px Noto Sans SC,sans-serif';
+            const isTotal = dataset.label === 'KPI合计';
+            ctx.font = isTotal ? 'bold 9px Noto Sans SC,sans-serif' : '9px Noto Sans SC,sans-serif';
             ctx.fillStyle = dataset.borderColor || '#cfcbe0';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
             meta.data.forEach((el, idx) => {
               const v = dataset.data[idx];
               if (!v) return;
-              const pos = el.tooltipPosition();
-              ctx.fillText(fmtVal(v), pos.x, pos.y - 5);
+              ctx.fillText(fmtVal(v), el.tooltipPosition().x, el.tooltipPosition().y - 5);
             });
           });
           ctx.restore();
@@ -607,52 +672,83 @@
         data: { labels: dates.map(fmtDateLabel), datasets: finalDatasets },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: true, labels: { color: '#cfcbe0', font: { size: 11 }, boxWidth: 12, padding: 10 } } },
+          plugins: { legend: { display: false } },
           scales: {
             x: { ticks: { color: '#cfcbe0', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(255,255,255,.05)' } },
             y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
           },
-          layout: { padding: { top: 28 } }
+          layout: { padding: { top: 18 } }
         },
-        plugins: [overallLabelPlugin]
+        plugins: [labelPlugin]
+      });
+
+      // ── 饼图（仅有筛选项时显示）──────────────────────────────
+      if (pieWrap) pieWrap.style.display = hasPie ? '' : 'none';
+      if (hasPie) _renderOverallKpiPie(allDatasets, palette);
+    }
+
+    function _renderOverallKpiPie(allDatasets, palette) {
+      const pieCtx = document.getElementById('overallKpiPieChart');
+      if (!pieCtx) return;
+
+      // 当单选某分项时，饼图也只高亮该项（其余变暗），全选/KPI合计时正常显示所有
+      const labels = [], data = [], colors = [], borderColors = [];
+      allDatasets.forEach((ds, i) => {
+        const total = ds.data.reduce((s, v) => s + (Number(v) || 0), 0);
+        if (!total) return;
+        labels.push(ds.label);
+        data.push(total);
+        const base = palette[i % palette.length];
+        const isDimmed = _overallKpiSelected !== null &&
+                         _overallKpiSelected !== _KPI_TOTAL_KEY &&
+                         _overallKpiSelected !== ds.label;
+        colors.push(isDimmed ? base + '33' : base + 'cc');
+        borderColors.push(isDimmed ? base + '55' : base);
+      });
+
+      chartOverallKpiPie && chartOverallKpiPie.destroy();
+      if (!labels.length) return;
+
+      const totalKpi = data.reduce((s, v) => s + v, 0);
+
+      chartOverallKpiPie = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data, backgroundColor: colors, borderColor: borderColors, borderWidth: 1.5, hoverOffset: 8 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: { color: '#cfcbe0', font: { size: 10 }, boxWidth: 10, padding: 8 }
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const pct = totalKpi > 0 ? (ctx.parsed / totalKpi * 100).toFixed(1) : 0;
+                  return ` ${ctx.label}: ${fmtVal(ctx.parsed)} (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
       });
     }
 
-
-
-
-    function buildTotalKpiDataset(dates, list, seriesMap) {
-      return {
-        label: '总KPI走势',
-        data: dates.map(dt => {
-          return list.reduce((sum, f) => {
-            const kpiMap = {};
-            (seriesMap[f.name]?.kpi || []).forEach(p => { kpiMap[p.date] = p.value; });
-            return sum + (kpiMap[dt] ?? 0);
-          }, 0);
-        }),
-        borderColor: '#ffffff',
-        backgroundColor: 'rgba(255,255,255,.1)',
-        borderWidth: 2.5,
-        borderDash: [5, 3],
-        pointRadius: dates.length > 60 ? 0 : 3,
-        pointHoverRadius: 5,
-        tension: 0.35,
-        fill: false,
-        order: 0
-      };
-    }
-
-    function toggleTotalKpiLine() {
-      // totalKpiLineVisible=false：显示分项+总KPI（默认）
-      // totalKpiLineVisible=true：只显示总KPI
-      totalKpiLineVisible = !totalKpiLineVisible;
+    function selectOverallKpi(name) {
+      _overallKpiSelected = name;
       renderOverallKpiChart();
     }
 
-    function updateTotalKpiBtnState() {
-      // 按钮状态由 renderOverallKpiChart 直接维护
-    }
+    function toggleTotalKpiLine() {}
+    function updateTotalKpiBtnState() {}
+
+
+
 
     // ── 人员 KPI 对比 ──────────────────────────────────────────
     // ── 甲方 KPI 走势 ────────────────────────────────────────
@@ -664,11 +760,8 @@
 
       card.style.display = '';
 
-      // 初始化：全选
-      if (selectedClients === null) selectedClients = new Set(clients);
-      // 过滤掉已消失的甲方
-      selectedClients = new Set([...selectedClients].filter(c => clients.includes(c)));
-      if (!selectedClients.size) selectedClients = new Set(clients);
+      // 初始化：全部（null），若已选中但甲方消失则重置
+      if (selectedClients !== null && !clients.includes(selectedClients)) selectedClients = null;
 
       renderClientTags(clients);
       requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -681,58 +774,42 @@
       const wrap = document.getElementById('clientTagsWrap');
       if (!wrap) return;
       const palette = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6','#a78bfa','#34d399'];
-      const allSelected = selectedClients.size === clients.length;
 
       wrap.innerHTML =
-        // 全选/全不选按钮
-        `<span onclick="toggleAllClients()" style="
+        `<span onclick="selectClient(null)" style="
           cursor:pointer;display:inline-flex;align-items:center;padding:4px 11px;
-          border-radius:20px;font-size:12px;font-weight:500;user-select:none;
-          border:1.5px solid ${allSelected ? 'var(--ac)' : 'var(--bd)'};
-          background:${allSelected ? 'rgba(200,169,126,.18)' : 'var(--s2)'};
-          color:${allSelected ? 'var(--ac)' : 'var(--mu)'};transition:all .15s">
-          ${allSelected ? '✓ ' : ''}全部
+          border-radius:20px;font-size:12px;font-weight:500;user-select:none;transition:all .15s;
+          border:1.5px solid ${selectedClients===null?'var(--ac)':'var(--bd)'};
+          background:${selectedClients===null?'rgba(200,169,126,.18)':'var(--s2)'};
+          color:${selectedClients===null?'var(--ac)':'var(--mu)'}">
+          ${selectedClients===null?'● ':''}全部
         </span>` +
         clients.map((cl, i) => {
-          const active = selectedClients.has(cl);
+          const active = selectedClients === cl;
           const color  = palette[i % palette.length];
-          return `<span onclick="toggleClient('${cl.replace(/'/g,"\'")}',${i})" style="
+          const safe   = cl.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          return `<span onclick="selectClient('${safe}')" style="
             cursor:pointer;display:inline-flex;align-items:center;padding:4px 11px;
-            border-radius:20px;font-size:12px;font-weight:500;user-select:none;
-            border:1.5px solid ${active ? color : 'var(--bd)'};
-            background:${active ? color + '22' : 'var(--s2)'};
-            color:${active ? color : 'var(--mu)'};transition:all .15s">
-            ${active ? '✓ ' : ''}${cl}
+            border-radius:20px;font-size:12px;font-weight:500;user-select:none;transition:all .15s;
+            border:1.5px solid ${active?color:'var(--bd)'};
+            background:${active?color+'22':'var(--s2)'};
+            color:${active?color:'var(--mu)'}">
+            ${active?'● ':''}${cl}
           </span>`;
         }).join('');
     }
 
-    function toggleClient(name, idx) {
+    function selectClient(name) {
       const series  = (allPerfData || perfData).client_kpi_series || {};
       const clients = Object.keys(series).sort();
-      if (selectedClients.has(name)) {
-        if (selectedClients.size > 1) selectedClients.delete(name);
-      } else {
-        selectedClients.add(name);
-      }
+      selectedClients = name;   // null = 全部；string = 单选
       renderClientTags(clients);
       renderClientKpiChart(series, clients);
       renderClientKpiPie(series, clients);
     }
 
-    function toggleAllClients() {
-      const series  = (allPerfData || perfData).client_kpi_series || {};
-      const clients = Object.keys(series).sort();
-      if (selectedClients.size === clients.length) {
-        // 已全选 → 不做全不选（至少保留一个），改为单选第一个
-        selectedClients = new Set([clients[0]]);
-      } else {
-        selectedClients = new Set(clients);
-      }
-      renderClientTags(clients);
-      renderClientKpiChart(series, clients);
-      renderClientKpiPie(series, clients);
-    }
+    function toggleClient(name) { selectClient(name === selectedClients ? null : name); }
+    function toggleAllClients()  { selectClient(null); }
 
     function renderClientKpiChart(series, allClients) {
       const ctx = document.getElementById('clientKpiChart');
@@ -742,7 +819,7 @@
       // 汇总所有已选甲方的日期
       const dateSet = new Set();
       allClients.forEach(cl => {
-        if (selectedClients.has(cl)) {
+        if (selectedClients === null || selectedClients === cl) {
           (series[cl] || []).forEach(p => dateSet.add(p.date));
         }
       });
@@ -750,7 +827,7 @@
 
       const datasets = allClients
         .map((cl, i) => ({ cl, i }))
-        .filter(({ cl }) => selectedClients.has(cl))
+        .filter(({ cl }) => selectedClients === null || selectedClients === cl)
         .map(({ cl, i }) => {
           const m = {};
           (series[cl] || []).forEach(p => { m[p.date] = p.value; });
@@ -816,7 +893,7 @@
       // 只统计已选甲方的 KPI 总量
       const labels = [], data = [], colors = [];
       allClients.forEach((cl, i) => {
-        if (!selectedClients.has(cl)) return;
+        if (selectedClients !== null && selectedClients !== cl) return;
         const total = (series[cl] || []).reduce((s, p) => s + (Number(p.value) || 0), 0);
         if (!total) return;
         labels.push(cl);
@@ -866,13 +943,21 @@
     function renderPersonTags() {
       const wrap = document.getElementById('personTagsWrap');
       if (!wrap) return;
-      const records = (allPerfData || perfData).records || [];
+      const records = (perfData || allPerfData).records || [];
       const allPersons = [...new Set(records.map(r => r.person))].sort();
       const palette = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6','#a78bfa','#34d399'];
 
+      // 计算每人 KPI 合计
+      const kpiByPerson = {};
+      records.forEach(r => {
+        kpiByPerson[r.person] = (kpiByPerson[r.person] || 0) + (Number(r.kpi_value) || 0);
+      });
+
       wrap.innerHTML = allPersons.map((p, i) => {
         const isActive = selectedPersons.includes(p);
-        const color = palette[i % palette.length];
+        const color    = palette[i % palette.length];
+        const kpiTotal = kpiByPerson[p] || 0;
+        const kpiLabel = kpiTotal % 1 === 0 ? kpiTotal : kpiTotal.toFixed(1);
         return `<span
           onclick="togglePersonCompare('${p.replace(/'/g,"\\'")}')"
           style="
@@ -882,8 +967,9 @@
             background:${isActive ? color + '22' : 'var(--s2)'};
             color:${isActive ? color : 'var(--mu)'};
             transition:all .15s;user-select:none;
-          "
-        >${isActive ? '✓ ' : ''}${p}</span>`;
+          ">
+          ${isActive ? '✓ ' : ''}${p}<span style="opacity:.7;font-size:11px;font-weight:400">&nbsp;${kpiLabel}</span>
+        </span>`;
       }).join('');
     }
 
@@ -916,7 +1002,7 @@
       chartWrap.style.display = '';
       emptyEl.style.display = 'none';
 
-      const records = (allPerfData || perfData).records || [];
+      const records = (perfData || allPerfData).records || [];
       const palette = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6','#a78bfa','#34d399'];
       const allPersons = [...new Set(records.map(r => r.person))].sort();
 
@@ -1232,8 +1318,25 @@
 
     function renderInsights() {
       const ins = perfData.insights || {};
+      const wk  = ins.week_vs_last || {};
       const trend = ins.trend_text || '暂无趋势数据';
-      document.getElementById('trendLine').textContent = trend;
+
+      // 计算本周日期范围：与后端逻辑一致，取数据最后一天往前7天
+      const records = (perfData.records || []);
+      const allDates = records.map(r => r.date).filter(Boolean).sort();
+      let weekRangeText = '';
+      if (allDates.length) {
+        const endDate  = new Date(allDates[allDates.length - 1] + 'T00:00:00');
+        const startDate = new Date(endDate);
+        startDate.setDate(endDate.getDate() - 6);
+        const fmt = d => d.toISOString().slice(0, 10);
+        weekRangeText = `${fmt(startDate)} ~ ${fmt(endDate)}`;
+      }
+
+      const trendEl = document.getElementById('trendLine');
+      trendEl.innerHTML = weekRangeText
+        ? `📅 ${weekRangeText}&nbsp;&nbsp;&nbsp;${trend}`
+        : trend;
 
       const mv = ins.month_vs_last || {};
       const yv = ins.yoy_month || {};
@@ -1523,18 +1626,55 @@
 
     function renderCharts() {
       if (isAdminHidden('dailyChartsBlock')) return;
-      const byDay = perfData.by_day || [];
-      const byMonth = perfData.by_month || [];
-      const byPerson = perfData.by_person || [];
+      // 月度任务量：受人员筛选、不受时间筛选
+      const byMonth  = (personFilterData || allPerfData || perfData).by_month || [];
+      // 人员任务量：受时间筛选、不受人员筛选
+      const byPerson = (timeFilterData || perfData).by_person || [];
 
-      chartDay && chartDay.destroy();
       chartMonth && chartMonth.destroy();
       chartPerson && chartPerson.destroy();
+      chartPersonKpiPie && chartPersonKpiPie.destroy();
 
-      chartDay = new Chart(document.getElementById('chartDay'), chartConfig(byDay.map(i=>fmtDateLabel(i.label)), byDay.map(i=>i.value), '数量', 'rgba(200,169,126,.6)', drillByDate));
       chartMonth = new Chart(document.getElementById('chartMonth'), chartConfig(byMonth.map(i=>fmtDateLabel(i.label)), byMonth.map(i=>i.value), '数量', 'rgba(124,106,245,.55)', drillByMonth));
-
       chartPerson = new Chart(document.getElementById('chartPerson'), chartConfig(byPerson.map(i=>i.label), byPerson.map(i=>i.value), '数量', 'rgba(92,184,92,.55)', drillByPerson));
+
+      // 人员KPI占比饼图：受时间筛选、不受人员筛选
+      const byPersonKpi = (timeFilterData || perfData).by_person || [];
+      const pieLabels = byPersonKpi.map(i => i.label);
+      const pieData   = byPersonKpi.map(i => i.value);
+      const palette   = ['#c8a97e','#7c6af5','#5cb85c','#e05c5c','#f0a030','#06b6d4','#ec4899','#14b8a6','#a78bfa','#34d399'];
+      const pieCtx    = document.getElementById('chartPersonKpiPie');
+      if (pieCtx && pieLabels.length) {
+        const totalKpi = pieData.reduce((s, v) => s + v, 0);
+        chartPersonKpiPie = new Chart(pieCtx, {
+          type: 'doughnut',
+          data: {
+            labels: pieLabels,
+            datasets: [{
+              data: pieData,
+              backgroundColor: pieLabels.map((_, i) => palette[i % palette.length] + 'cc'),
+              borderColor:     pieLabels.map((_, i) => palette[i % palette.length]),
+              borderWidth: 1.5,
+              hoverOffset: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: true, position: 'bottom', labels: { color: '#cfcbe0', font: { size: 10 }, boxWidth: 10, padding: 8 } },
+              tooltip: {
+                callbacks: {
+                  label(ctx) {
+                    const pct = totalKpi > 0 ? (ctx.parsed / totalKpi * 100).toFixed(1) : 0;
+                    return ` ${ctx.label}: ${fmtVal(ctx.parsed)} (${pct}%)`;
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
     }
 
     function renderTable() {
@@ -1589,7 +1729,7 @@
           from:   document.getElementById('fFrom').value,
           to:     document.getElementById('fTo').value,
           activeFilter: activeCustomFilter,
-          selectedClients: selectedClients ? [...selectedClients] : null,
+          selectedClients: selectedClients,
           selectedPersons: selectedPersons
         }));
       } catch(e) {}
@@ -1607,12 +1747,12 @@
     // 模块顺序排列
     const MODULE_BLOCKS = [
       { key: 'stats_panel',    id: 'statsWrap' },
-      { key: 'kpi_trend',      id: 'kpiTrendCard' },
       { key: 'insight',        id: 'insightCard' },
+      { key: 'kpi_trend',      id: 'kpiTrendCard' },
+      { key: 'daily_charts',   id: 'dailyChartsBlock' },
       { key: 'filter_stats',   id: 'customFilterCard' },
       { key: 'client_kpi',     id: 'clientKpiCard' },
       { key: 'person_compare', id: 'personCompareCard' },
-      { key: 'daily_charts',   id: 'dailyChartsBlock' },
       { key: 'detail_table',   id: 'detailTableBlock' }
     ];
 
@@ -1646,7 +1786,7 @@
       if (saved) {
         if (saved.activeFilter)    activeCustomFilter = saved.activeFilter;
         if (saved.selectedPersons) selectedPersons    = saved.selectedPersons;
-        if (saved.selectedClients) selectedClients = new Set(saved.selectedClients);
+        if (saved.selectedClients !== undefined) selectedClients = saved.selectedClients;
       }
 
       // 先单独拉配置（加时间戳防缓存），用于初始化主题/标题/顺序/人员下拉
@@ -1673,9 +1813,9 @@
       applyTitles(_chartTitles);
       renderFooter(appCfg.footer_items || []);
       const setEl = (id, v) => { const el = document.getElementById(id); if (el && v) el.textContent = v; };
-      setEl('ctDayChart',    _chartTitles.mod_daily_charts);
-      setEl('ctMonthChart',  _chartTitles.mod_monthly_charts);
-      setEl('ctPersonChart', _chartTitles.mod_person_charts);
+      setEl('ctMonthChart',       _chartTitles.mod_monthly_charts);
+      setEl('ctPersonChart',      _chartTitles.mod_person_charts);
+      setEl('ctPersonKpiPieChart', _chartTitles.mod_person_kpi_pie);
 
       // 渲染主题切换器
       renderThemeSwitcher();

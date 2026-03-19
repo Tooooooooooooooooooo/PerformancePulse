@@ -80,28 +80,45 @@
           <div class="ct">⬆️ 数据上传</div>
       <div class="fg" style="margin-bottom:10px">
         <label>Excel 文件（.xls/.xlsx）</label>
-        <input class="inp" type="file" id="perfFile" accept=".xls,.xlsx" style="padding:6px">
+        <input class="inp" type="file" id="perfFile" accept=".xls,.xlsx" style="padding:6px" onchange="onPerfFileChange()">
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-p" onclick="uploadPerformanceExcel()">上传并解析</button>
+        <button class="btn btn-p" id="btnPreview" onclick="previewPerformanceExcel()" disabled>预览并确认</button>
         <span id="perfUploadStatus" style="font-size:12px;color:var(--mu)"></span>
       </div>
       <div id="formatWarningsWrap" style="display:none;margin-top:14px">
         <div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px">⚠️ 发现格式问题，已正常解析但建议修正：</div>
         <div id="formatWarningsList" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;scrollbar-width:none"></div>
       </div>
+    </div>
 
+    <!-- 上传预览确认弹窗 -->
+    <div id="previewModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center">
+      <div style="background:var(--s1);border:1px solid var(--bd);border-radius:16px;padding:24px 28px;max-width:520px;width:92%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.6)">
+        <div style="font-size:15px;font-weight:700;color:var(--tx);margin-bottom:16px">📋 上传预览 — 请确认</div>
+        <div id="previewBody" style="font-size:13px;line-height:1.9;color:var(--tx)"></div>
+        <div id="previewWarnings" style="margin-top:14px;display:none">
+          <div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px">⚠️ 发现格式问题（入库前建议修正）：</div>
+          <div id="previewWarningsList" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;scrollbar-width:none"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
+          <button class="btn btn-s" onclick="closePreview()">取消</button>
+          <button class="btn btn-p" id="btnConfirmUpload" onclick="confirmUpload()">确认入库</button>
+        </div>
+      </div>
     </div>
 
         <div class="card" id="section_check">
           <div class="ct">🔍 数据规范检查</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">扫描数据库中已入库的全部记录，列出书写不规范的条目</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">扫描数据库中已入库的全部记录，按严重/一般分级列出问题条目</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <button class="btn btn-p" onclick="runFormatCheck()">开始检查</button>
+        <button class="btn btn-s" id="btnExportIssues" onclick="exportIssues()" style="display:none">⬇ 导出问题清单</button>
         <span id="fmtCheckStatus" style="font-size:12px;color:var(--mu)"></span>
       </div>
       <div id="fmtCheckResult" style="display:none">
         <div id="fmtCheckSummary" style="font-size:12px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap" id="fmtFilterBar"></div>
         <div id="fmtCheckList" style="display:flex;flex-direction:column;gap:8px;max-height:480px;overflow-y:auto;scrollbar-width:none"></div>
       </div>
     </div>
@@ -150,15 +167,28 @@
 
         <div class="card" id="section_filters">
           <div class="ct">🔖 自定义筛选项（关键词）</div>
-      <div class="fr">
+      <div class="fr" style="flex-wrap:wrap;gap:8px">
         <div class="fg">
           <label>显示名称</label>
           <input class="inp" id="filterName" placeholder="建模">
         </div>
-        <div class="fg">
+        <div class="fg" style="flex:2">
           <label>关键词</label>
           <input class="inp" id="filterKeyword" placeholder="建模，渲染，出图">
-          <div style="font-size:11px;color:var(--mu)">可输入多个关键词并用“，”中文逗号分隔，包含任一关键词即可匹配</div>
+          <div style="font-size:11px;color:var(--mu);margin-top:3px" id="filterKeywordHint">多个关键词用逗号分隔，包含任一即匹配</div>
+        </div>
+        <div class="fg">
+          <label>匹配模式</label>
+          <select class="inp" id="filterMatchMode" onchange="updateFilterHint()">
+            <option value="contains">包含</option>
+            <option value="exact">精确</option>
+            <option value="regex">正则</option>
+          </select>
+        </div>
+        <div class="fg" style="flex:2">
+          <label>排除词 <span style="font-size:11px;color:var(--mu)">(可选)</span></label>
+          <input class="inp" id="filterExcludes" placeholder="非SKU，草稿">
+          <div style="font-size:11px;color:var(--mu);margin-top:3px">命中排除词则跳过，多个用逗号分隔</div>
         </div>
         <div class="fg">
           <label>KPI 系数</label>
@@ -171,6 +201,32 @@
       </div>
       <div id="customFilterList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
       <button class="btn btn-s" style="margin-top:8px" onclick="saveCustomFilters()">保存筛选项</button>
+
+      <!-- 未命中记录表 -->
+      <div id="unmatchedWrap" style="margin-top:20px;display:none">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--tx)">⚠️ 未被任何筛选规则命中的记录</span>
+          <span id="unmatchedBadge" style="background:rgba(224,92,92,.18);color:#e05c5c;border:1px solid rgba(224,92,92,.35);border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700"></span>
+          <button class="btn btn-s" onclick="exportUnmatched()" style="font-size:11px">⬇ 导出</button>
+          <input id="unmatchedSearch" class="inp" placeholder="搜索任务描述 / 人员 / 甲方…" oninput="renderUnmatched()" style="flex:1;min-width:160px;max-width:280px;font-size:12px;padding:4px 8px">
+        </div>
+        <div style="font-size:11px;color:var(--mu);margin-bottom:8px">这些记录的数量<b>不会被计入 KPI 统计</b>，请检查是否需要补充筛选规则</div>
+        <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--bd)">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--s3);color:var(--mu)">
+                <th style="padding:8px 10px;text-align:left;white-space:nowrap;font-weight:600">日期</th>
+                <th style="padding:8px 10px;text-align:left;font-weight:600">人员</th>
+                <th style="padding:8px 10px;text-align:left;font-weight:600">甲方</th>
+                <th style="padding:8px 10px;text-align:left;font-weight:600;min-width:180px">任务描述</th>
+                <th style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">数量</th>
+              </tr>
+            </thead>
+            <tbody id="unmatchedTbody"></tbody>
+          </table>
+        </div>
+        <div id="unmatchedPager" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--mu)"></div>
+      </div>
     </div>
 
         <div class="card" id="section_decimal">
@@ -444,10 +500,10 @@
       'filter_stats':   '📌 自定义筛选项 KPI 总览',
       'client_kpi':     '🏢 甲方 KPI 走势',
       'person_compare': '👤 人员 KPI 对比',
-      'daily_charts':   '📅 每日/月度/人员图表',
+      'daily_charts':   '📊 月度/人员任务量/KPI占比',
       'detail_table':   '📋 明细表'
     };
-    const MODULE_KEYS = ['stats_panel', 'kpi_trend', 'insight', 'filter_stats', 'client_kpi', 'person_compare', 'daily_charts', 'detail_table'];
+    const MODULE_KEYS = ['stats_panel', 'insight', 'kpi_trend', 'daily_charts', 'filter_stats', 'client_kpi', 'person_compare', 'detail_table'];
 
     let _dragSrc = null;
 
@@ -537,6 +593,15 @@
       if (res.ok) toast('模块顺序已保存'); else toast('保存失败', 'err');
     }
 
+    // _fmtCheckData: 全量警告数据，用于过滤和导出
+    let _fmtCheckData = [];
+
+    function _issueTag(level) {
+      return level === 'severe'
+        ? '<span style="background:rgba(224,92,92,.18);color:#e05c5c;border:1px solid rgba(224,92,92,.4);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap">🔴 严重</span>'
+        : '<span style="background:rgba(240,160,48,.12);color:#f0a030;border:1px solid rgba(240,160,48,.35);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap">🟡 一般</span>';
+    }
+
     function renderFormatWarnings(warnings) {
       const wrap = document.getElementById('formatWarningsWrap');
       const list = document.getElementById('formatWarningsList');
@@ -545,17 +610,28 @@
         return;
       }
       wrap.style.display = '';
-      list.innerHTML = warnings.map(w => `
-        <div style="background:var(--s2);border:1px solid rgba(240,160,48,.3);border-radius:9px;padding:9px 12px">
+      list.innerHTML = warnings.map(w => {
+        const hasSevere = w.has_severe || (w.issues || []).some(i => (i.level||'') === 'severe');
+        const borderColor = hasSevere ? 'rgba(224,92,92,.45)' : 'rgba(240,160,48,.3)';
+        const issues = (w.issues || []).map(i => {
+          const isObj = typeof i === 'object';
+          const msg   = isObj ? i.msg  : i;
+          const level = isObj ? (i.level||'normal') : 'normal';
+          return `<div style="font-size:11px;color:${level==='severe'?'#e05c5c':'var(--warn)'};display:flex;align-items:flex-start;gap:6px">
+            ${_issueTag(level)}<span>${esc(msg)}</span>
+          </div>`;
+        }).join('');
+        return `
+        <div style="background:var(--s2);border:1px solid ${borderColor};border-radius:9px;padding:9px 12px">
           <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:5px;flex-wrap:wrap">
-            <span style="font-size:10px;color:var(--mu)">第 ${w.row} 行</span>
-            <span style="font-size:11px;font-weight:600;color:var(--ac)">${esc(w.person)}</span>
-            <span style="font-size:10px;color:var(--mu)">${w.date}</span>
+            <span style="font-size:10px;color:var(--mu)">第 ${w.row||'-'} 行</span>
+            <span style="font-size:11px;font-weight:600;color:var(--ac)">${esc(w.person||'')}</span>
+            <span style="font-size:10px;color:var(--mu)">${w.date||''}</span>
           </div>
-          <div style="font-size:11px;color:var(--mu);background:var(--s3);border-radius:6px;padding:5px 8px;margin-bottom:6px;word-break:break-all">${esc(w.text)}</div>
-          ${w.issues.map(i => `<div style="font-size:11px;color:var(--warn);display:flex;align-items:flex-start;gap:5px"><span style="opacity:.7;flex-shrink:0">▸</span>${esc(i)}</div>`).join('')}
-        </div>
-      `).join('');
+          <div style="font-size:11px;color:var(--mu);background:var(--s3);border-radius:6px;padding:5px 8px;margin-bottom:6px;word-break:break-all">${esc(w.text||w.task_desc||'')}</div>
+          <div style="display:flex;flex-direction:column;gap:4px">${issues}</div>
+        </div>`;
+      }).join('');
     }
 
     async function loadPerformanceAdmin() {
@@ -576,6 +652,7 @@
       _selectedAdminTheme = (_perfCfg.app || {}).default_theme || 'dark';
       renderPerfPeople();
       renderCustomFilters();
+      loadUnmatched();
       renderStatsOrder();
       renderModuleOrder();
       renderAdminThemePicker();
@@ -635,20 +712,31 @@
         wrap.innerHTML = '<div style="font-size:12px;color:var(--mu)">暂无自定义筛选项</div>';
         return;
       }
+      const modeLabel = {contains:'包含',exact:'精确',regex:'正则'};
       wrap.innerHTML = list.map((f, idx) => `
         <div class="cf-item" draggable="true" data-idx="${idx}"
           ondragstart="onFDragStart(event)" ondragover="onFDragOver(event)"
           ondrop="onFDrop(event)" ondragend="onFDragEnd(event)"
-          style="display:grid;grid-template-columns:18px 1fr 1fr 90px auto auto;gap:8px;align-items:center;
-            padding:4px 6px;border-radius:8px;border:1px solid transparent;transition:border-color .12s,background .12s">
-          <span style="color:var(--mu);cursor:grab;text-align:center;font-size:13px;user-select:none">☰</span>
-          <input class="inp" data-f="name"    value="${esc(f.name    || '')}" oninput="syncCF(this)">
-          <input class="inp" data-f="keyword" value="${esc(f.keyword || '')}" oninput="syncCF(this)">
-          <input class="inp" data-f="kpi"     value="${f.kpi ?? 1}"           oninput="syncCF(this)" style="width:100%">
-          <label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer;white-space:nowrap">
-            <input type="checkbox" data-f="enabled" ${f.enabled ? 'checked' : ''} onchange="syncCF(this)">启用
-          </label>
-          <button class="btn btn-s" onclick="removeCustomFilter(${idx})">删除</button>
+          style="display:flex;flex-direction:column;gap:6px;
+            padding:8px 10px;border-radius:10px;border:1px solid var(--bd);background:var(--s2);transition:border-color .12s,background .12s">
+          <div style="display:grid;grid-template-columns:18px 1fr 1.5fr 90px auto;gap:8px;align-items:center">
+            <span style="color:var(--mu);cursor:grab;text-align:center;font-size:13px;user-select:none">☰</span>
+            <input class="inp" data-f="name"    value="${esc(f.name    || '')}" placeholder="名称" oninput="syncCF(this)" title="显示名称">
+            <input class="inp" data-f="keyword" value="${esc(f.keyword || '')}" placeholder="关键词" oninput="syncCF(this)" title="关键词（逗号分隔）">
+            <input class="inp" data-f="kpi"     value="${f.kpi ?? 1}"           oninput="syncCF(this)" style="width:100%" title="KPI系数">
+            <label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer;white-space:nowrap">
+              <input type="checkbox" data-f="enabled" ${f.enabled ? 'checked' : ''} onchange="syncCF(this)">启用
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center;padding-left:26px">
+            <select class="inp" data-f="match_mode" onchange="syncCF(this)" style="font-size:12px" title="匹配模式">
+              <option value="contains" ${(f.match_mode||'contains')==='contains'?'selected':''}>📎 包含匹配</option>
+              <option value="exact"    ${(f.match_mode||'')==='exact'   ?'selected':''}>🎯 精确匹配</option>
+              <option value="regex"    ${(f.match_mode||'')==='regex'   ?'selected':''}>🔣 正则匹配</option>
+            </select>
+            <input class="inp" data-f="excludes" value="${esc(f.excludes || '')}" placeholder="排除词（如：非SKU，草稿）" oninput="syncCF(this)" style="font-size:12px" title="排除词，命中则跳过">
+            <button class="btn btn-s" onclick="removeCustomFilter(${idx})" style="white-space:nowrap">删除</button>
+          </div>
         </div>
       `).join('');
     }
@@ -664,6 +752,16 @@
       if (field === 'enabled') f[field] = el.checked;
       else if (field === 'kpi') f[field] = parseFloat(el.value) || 1;
       else f[field] = el.value;
+    }
+
+    // 根据匹配模式更新提示文案
+    function updateFilterHint() {
+      const mode = document.getElementById('filterMatchMode').value;
+      const hint = document.getElementById('filterKeywordHint');
+      if (!hint) return;
+      if (mode === 'exact') hint.textContent = '精确匹配：关键词须与任务描述完全一致（忽略大小写）';
+      else if (mode === 'regex') hint.textContent = '正则匹配：每个关键词作为正则表达式，支持复杂规则';
+      else hint.textContent = '包含匹配：多个关键词用逗号分隔，包含任一即匹配';
     }
 
     // 拖拽：与模块顺序拖拽完全独立的变量和函数
@@ -713,15 +811,27 @@
     }
 
     function addCustomFilter() {
-      const name = document.getElementById('filterName').value.trim();
-      const keyword = document.getElementById('filterKeyword').value.trim();
-      const kpi = parseFloat(document.getElementById('filterKpi').value) || 1;
+      const name      = document.getElementById('filterName').value.trim();
+      const keyword   = document.getElementById('filterKeyword').value.trim();
+      const kpi       = parseFloat(document.getElementById('filterKpi').value) || 1;
+      const matchMode = document.getElementById('filterMatchMode').value || 'contains';
+      const excludes  = document.getElementById('filterExcludes').value.trim();
       if (!name || !keyword) { toast('请输入显示名称与关键词','err'); return; }
+      // 正则模式：校验合法性
+      if (matchMode === 'regex') {
+        const parts = keyword.split(/[，,;；]+/).map(s => s.trim()).filter(Boolean);
+        for (const p of parts) {
+          try { new RegExp(p); } catch(e) { toast(`正则表达式有误：${p}`,'err'); return; }
+        }
+      }
       if (!_perfCfg.custom_filters) _perfCfg.custom_filters = [];
-      _perfCfg.custom_filters.push({name, keyword, kpi, enabled: true});
+      _perfCfg.custom_filters.push({name, keyword, kpi, enabled: true, match_mode: matchMode, excludes});
       document.getElementById('filterName').value = '';
       document.getElementById('filterKeyword').value = '';
       document.getElementById('filterKpi').value = '';
+      document.getElementById('filterMatchMode').value = 'contains';
+      document.getElementById('filterExcludes').value = '';
+      updateFilterHint();
       renderCustomFilters();
     }
 
@@ -736,7 +846,91 @@
         method:'PUT', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ custom_filters: _perfCfg.custom_filters || [] })
       });
-      if (res.ok) toast('筛选项已保存'); else toast('保存失败','err');
+      if (res.ok) { toast('筛选项已保存'); loadUnmatched(); }
+      else toast('保存失败','err');
+    }
+
+    // ── 未命中记录表 ─────────────────────────────────────────
+    let _unmatchedAll  = [];  // 全量数据
+    let _unmatchedPage = 1;
+    const _unmatchedPageSize = 50;
+
+    async function loadUnmatched() {
+      // 只有存在启用的筛选项才有意义
+      const hasFilter = (_perfCfg.custom_filters || []).some(f => f.enabled);
+      const wrap = document.getElementById('unmatchedWrap');
+      if (!hasFilter) { wrap.style.display = 'none'; return; }
+      try {
+        const res = await fetch('/api/performance/summary');
+        if (!res.ok) return;
+        const data = await res.json();
+        _unmatchedAll  = data.unmatched_records || [];
+        _unmatchedPage = 1;
+        wrap.style.display = _unmatchedAll.length ? '' : 'none';
+        const badge = document.getElementById('unmatchedBadge');
+        badge.textContent = _unmatchedAll.length + ' 条';
+        renderUnmatched();
+      } catch(e) { /* silent */ }
+    }
+
+    function renderUnmatched() {
+      const q = (document.getElementById('unmatchedSearch').value || '').trim().toLowerCase();
+      const filtered = q
+        ? _unmatchedAll.filter(r =>
+            (r.task_desc||'').toLowerCase().includes(q) ||
+            (r.person||'').toLowerCase().includes(q) ||
+            (r.client||'').toLowerCase().includes(q))
+        : _unmatchedAll;
+
+      const total = filtered.length;
+      const pages = Math.max(1, Math.ceil(total / _unmatchedPageSize));
+      if (_unmatchedPage > pages) _unmatchedPage = pages;
+      const start = (_unmatchedPage - 1) * _unmatchedPageSize;
+      const slice = filtered.slice(start, start + _unmatchedPageSize);
+
+      const tbody = document.getElementById('unmatchedTbody');
+      if (!slice.length) {
+        tbody.innerHTML = `<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--mu)">
+          ${q ? '无匹配结果' : '暂无未命中记录 ✅'}</td></tr>`;
+      } else {
+        tbody.innerHTML = slice.map((r, i) => `
+          <tr style="border-top:1px solid var(--bd);background:${i%2===0?'transparent':'rgba(255,255,255,.02)'}">
+            <td style="padding:7px 10px;color:var(--mu);white-space:nowrap">${esc(r.date)}</td>
+            <td style="padding:7px 10px;color:var(--ac);font-weight:600">${esc(r.person)}</td>
+            <td style="padding:7px 10px;color:var(--ac2)">${esc(r.client||'—')}</td>
+            <td style="padding:7px 10px;color:var(--tx);word-break:break-all">${esc(r.task_desc)}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--tx);white-space:nowrap">
+              ${r.quantity}${r.unit ? ' ' + esc(r.unit) : ''}
+            </td>
+          </tr>`).join('');
+      }
+
+      // 分页控件
+      const pager = document.getElementById('unmatchedPager');
+      if (pages <= 1) { pager.innerHTML = `<span>共 ${total} 条</span>`; return; }
+      pager.innerHTML = `
+        <span>共 ${total} 条</span>
+        <button class="btn btn-s" onclick="_unmatchedPage=Math.max(1,_unmatchedPage-1);renderUnmatched()"
+          ${_unmatchedPage<=1?'disabled':''} style="font-size:11px;padding:3px 8px">‹ 上一页</button>
+        <span>${_unmatchedPage} / ${pages}</span>
+        <button class="btn btn-s" onclick="_unmatchedPage=Math.min(${pages},_unmatchedPage+1);renderUnmatched()"
+          ${_unmatchedPage>=pages?'disabled':''} style="font-size:11px;padding:3px 8px">下一页 ›</button>`;
+    }
+
+    function exportUnmatched() {
+      if (!_unmatchedAll.length) return;
+      const q = (document.getElementById('unmatchedSearch').value || '').trim().toLowerCase();
+      const rows = (q ? _unmatchedAll.filter(r =>
+        (r.task_desc||'').toLowerCase().includes(q) ||
+        (r.person||'').toLowerCase().includes(q) ||
+        (r.client||'').toLowerCase().includes(q)) : _unmatchedAll);
+      const csv = [['日期','人员','甲方','任务描述','数量','单位'],
+        ...rows.map(r => [r.date, r.person, r.client||'', r.task_desc, r.quantity, r.unit||''])
+      ].map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'}));
+      a.download = '未命中记录_' + new Date().toISOString().slice(0,10) + '.csv';
+      a.click();
     }
 
     async function saveChartJsUrl() {
@@ -764,12 +958,76 @@
       if (res.ok) toast('Excel 配置已保存'); else toast('保存失败','err');
     }
 
+    let _fmtFilter = 'all'; // 'all' | 'severe' | 'normal'
+
+    function renderFmtList(warnings) {
+      const list = document.getElementById('fmtCheckList');
+      const filtered = _fmtFilter === 'severe'  ? warnings.filter(w => w.has_severe) :
+                       _fmtFilter === 'normal'   ? warnings.filter(w => !w.has_severe) : warnings;
+      if (!filtered.length) { list.innerHTML = '<div style="font-size:12px;color:var(--mu)">该分类下暂无问题</div>'; return; }
+      list.innerHTML = filtered.map(w => {
+        const borderColor = w.has_severe ? 'rgba(224,92,92,.5)' : 'rgba(240,160,48,.4)';
+        const issues = (w.issues || []).map(i => {
+          const isObj = typeof i === 'object';
+          const msg   = isObj ? i.msg : i;
+          const level = isObj ? (i.level||'normal') : 'normal';
+          return `<div style="font-size:11px;color:${level==='severe'?'#e05c5c':'var(--warn)'};display:flex;align-items:flex-start;gap:6px;padding:2px 0">
+            ${_issueTag(level)}<span style="flex:1">${esc(msg)}</span>
+          </div>`;
+        }).join('');
+        return `
+        <div style="background:var(--s2);border:1px solid ${borderColor};border-left:3px solid ${w.has_severe?'#e05c5c':'var(--warn)'};
+          border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <span style="color:var(--mu)">${w.date}</span>
+            <span style="color:var(--ac);font-weight:600">${esc(w.person)}</span>
+            ${w.client ? `<span style="color:var(--ac2)">${esc(w.client)}</span>` : ''}
+          </div>
+          <div style="color:var(--tx);margin-bottom:6px;word-break:break-all">
+            ${esc(w.task_desc)}${w.quantity && w.quantity !== 1 ? ` × ${w.quantity}${esc(w.unit)}` : ''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px">${issues}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function setFmtFilter(f) {
+      _fmtFilter = f;
+      document.querySelectorAll('.fmt-filter-btn').forEach(b => {
+        b.style.background = b.dataset.f === f ? 'var(--ac)' : '';
+        b.style.color      = b.dataset.f === f ? 'var(--bg)' : '';
+      });
+      renderFmtList(_fmtCheckData);
+    }
+
+    function exportIssues() {
+      if (!_fmtCheckData.length) return;
+      const rows = [['日期','人员','甲方','任务描述','数量','单位','等级','问题描述']];
+      for (const w of _fmtCheckData) {
+        for (const i of (w.issues||[])) {
+          const isObj = typeof i === 'object';
+          rows.push([
+            w.date, w.person, w.client||'', w.task_desc,
+            w.quantity||'', w.unit||'',
+            isObj ? (i.level==='severe'?'严重':'一般') : '一般',
+            isObj ? i.msg : i
+          ]);
+        }
+      }
+      const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+      const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '规范问题清单_' + new Date().toISOString().slice(0,10) + '.csv';
+      a.click();
+    }
+
     async function runFormatCheck() {
       const btn    = event.target;
       const status = document.getElementById('fmtCheckStatus');
       const result = document.getElementById('fmtCheckResult');
       const summary = document.getElementById('fmtCheckSummary');
-      const list   = document.getElementById('fmtCheckList');
+      const filterBar = document.getElementById('fmtFilterBar');
       btn.disabled = true;
       status.textContent = '检查中…';
       result.style.display = 'none';
@@ -777,32 +1035,29 @@
         const res  = await fetch('/api/performance/format-check');
         if (res.status === 401) { toast('登录已过期，请刷新页面重新登录', 'err'); return; }
         const data = await res.json();
-        const { warnings, total, issue_count } = data;
-        status.textContent = `共扫描 ${total} 条，发现 ${issue_count} 条不规范`;
+        const { warnings, total, issue_count, severe_total } = data;
+        _fmtCheckData = warnings || [];
+        const normalTotal = issue_count - (severe_total||0);
+        document.getElementById('btnExportIssues').style.display = issue_count ? '' : 'none';
+        status.textContent = `共扫描 ${total} 条 · 问题 ${issue_count} 条（严重 ${severe_total||0}，一般 ${normalTotal}）`;
         status.style.color = issue_count > 0 ? 'var(--warn)' : 'var(--ok)';
         result.style.display = '';
-
+        _fmtFilter = 'all';
         if (!issue_count) {
           summary.innerHTML = '<span style="color:var(--ok)">✅ 全部记录书写规范，未发现问题</span>';
-          list.innerHTML = '';
+          filterBar.innerHTML = '';
+          document.getElementById('fmtCheckList').innerHTML = '';
         } else {
-          summary.innerHTML = `<span style="color:var(--warn)">⚠️ 发现 ${issue_count} 条不规范记录，建议在源文件中修正后重新上传</span>`;
-          list.innerHTML = warnings.map(w => `
-            <div style="background:var(--s2);border:1px solid var(--bd);border-left:3px solid var(--warn);
-              border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7">
-              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px">
-                <span style="color:var(--mu)">${w.date}</span>
-                <span style="color:var(--ac);font-weight:600">${esc(w.person)}</span>
-                ${w.client ? `<span style="color:var(--ac2)">${esc(w.client)}</span>` : ''}
-              </div>
-              <div style="color:var(--tx);margin-bottom:6px;word-break:break-all">
-                ${esc(w.task_desc)}${w.quantity && w.quantity !== 1 ? ` × ${w.quantity}${esc(w.unit)}` : ''}
-              </div>
-              <div style="display:flex;flex-direction:column;gap:2px">
-                ${w.issues.map(i => `<span style="color:var(--warn)">• ${esc(i)}</span>`).join('')}
-              </div>
-            </div>
-          `).join('');
+          summary.innerHTML = `<span style="color:var(--tx)">发现 <b style="color:#e05c5c">${severe_total||0} 条严重</b>、<b style="color:var(--warn)">${normalTotal} 条一般</b>问题，建议修正后重新上传</span>`;
+          filterBar.innerHTML = [
+            {f:'all',   label:`全部 (${issue_count})`},
+            {f:'severe',label:`🔴 严重 (${severe_total||0})`},
+            {f:'normal',label:`🟡 一般 (${normalTotal})`}
+          ].map(({f,label}) =>
+            `<button class="btn btn-s fmt-filter-btn" data-f="${f}" onclick="setFmtFilter('${f}')"
+              style="font-size:11px;${f==='all'?'background:var(--ac);color:var(--bg)':''}">${label}</button>`
+          ).join('');
+          renderFmtList(_fmtCheckData);
         }
       } catch(e) {
         status.textContent = '检查失败：' + e.message;
@@ -812,31 +1067,130 @@
       }
     }
 
-    async function uploadPerformanceExcel() {
+    let _pendingUploadFile = null; // 预览后等待确认的文件
+
+    function onPerfFileChange() {
+      const fileInp = document.getElementById('perfFile');
+      const btn = document.getElementById('btnPreview');
+      btn.disabled = !fileInp.files[0];
+      _pendingUploadFile = null;
+    }
+
+    function closePreview() {
+      document.getElementById('previewModal').style.display = 'none';
+    }
+
+    async function previewPerformanceExcel() {
       const fileInp = document.getElementById('perfFile');
       const st = document.getElementById('perfUploadStatus');
       if (!fileInp.files[0]) { toast('请选择 Excel 文件','err'); return; }
+      const btn = document.getElementById('btnPreview');
+      btn.disabled = true;
+      st.textContent = '解析预览中…';
       const fd = new FormData();
       fd.append('file', fileInp.files[0]);
-      st.textContent = '上传解析中...';
-      const res = await fetch('/admin/performance/upload', {method:'POST', body:fd});
-      const d = await res.json();
-      if (d.success) {
-        st.textContent = `合并成功：${d.count} 条记录（${d.date_range || ''}）`;
-        // 上传路由已维护好 people 表，直接重新加载配置刷新显示，不在前端写人员
-        _perfCfg = await fetch('/admin/performance/config').then(r => r.json()).catch(() => _perfCfg);
-        renderPerfPeople();
-        renderFormatWarnings(d.format_warnings || []);
-        toast(d.format_warnings && d.format_warnings.length
-          ? `上传成功，${d.format_warnings.length} 处格式问题`
-          : '上传成功',
-          d.format_warnings && d.format_warnings.length ? 'warn' : 'ok');
-      } else {
-        st.textContent = d.error || '上传失败';
-        renderFormatWarnings(d.format_warnings || []);
-        toast(d.error || '上传失败', 'err');
+      try {
+        let res;
+        try { res = await fetch('/admin/performance/preview', {method:'POST', body:fd}); }
+        catch(e) { throw new Error('网络错误：' + e.message); }
+        if (res.status === 401) { toast('登录已过期，请刷新页面重新登录', 'err'); st.textContent = ''; return; }
+        if (!res.ok) { throw new Error('HTTP ' + res.status + '，请确认服务器已重启'); }
+        let d;
+        try { d = await res.json(); } catch(e) { throw new Error('返回内容非 JSON，请确认服务器已重启'); }
+        if (!d.success) {
+          st.textContent = d.error || '预览失败';
+          toast(d.error || '预览失败', 'err');
+          return;
+        }
+        _pendingUploadFile = fileInp.files[0];
+        st.textContent = '';
+        // 构建弹窗内容
+        const modal = document.getElementById('previewModal');
+        const body  = document.getElementById('previewBody');
+        const warnWrap = document.getElementById('previewWarnings');
+        const warnList = document.getElementById('previewWarningsList');
+        const severeBadge = d.severe_count > 0
+          ? `<span style="color:#e05c5c;font-weight:700"> · 含 ${d.severe_count} 条严重问题</span>` : '';
+        body.innerHTML = `
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:baseline">
+            <span style="color:var(--mu)">日期范围</span><span style="color:var(--ac);font-weight:600">${d.date_min} ~ ${d.date_max}</span>
+            <span style="color:var(--mu)">解析条数</span><span><b style="color:var(--ac2)">${d.new_count}</b> 条新记录</span>
+            <span style="color:var(--mu)">覆盖旧数据</span><span>${d.overlap_count > 0
+              ? `<b style="color:#e05c5c">${d.overlap_count}</b> 条旧记录将被替换`
+              : '<span style="color:var(--ok)">无重叠，仅新增</span>'}</span>
+            <span style="color:var(--mu)">涉及人员</span><span style="color:var(--tx)">${d.people.join('、')}</span>
+            <span style="color:var(--mu)">格式问题</span><span>${
+              (d.format_warnings||[]).length === 0
+                ? '<span style="color:var(--ok)">✅ 无问题</span>'
+                : `<b style="color:var(--warn)">${d.format_warnings.length} 处</b>${severeBadge}`
+            }</span>
+          </div>`;
+        if ((d.format_warnings||[]).length) {
+          warnWrap.style.display = '';
+          warnList.innerHTML = (d.format_warnings||[]).map(w => {
+            const issues = (w.issues||[]).map(i => {
+              const isObj = typeof i === 'object';
+              const msg   = isObj ? i.msg : i;
+              const level = isObj ? (i.level||'normal') : 'normal';
+              return `<div style="font-size:11px;color:${level==='severe'?'#e05c5c':'var(--warn)'};display:flex;gap:6px;align-items:flex-start">${_issueTag(level)}<span>${esc(msg)}</span></div>`;
+            }).join('');
+            return `<div style="background:var(--s3);border-radius:8px;padding:8px 10px;font-size:12px">
+              <div style="color:var(--mu);margin-bottom:4px">第${w.row||'-'}行 · ${esc(w.person||'')} · ${w.date||''}</div>
+              <div style="color:var(--tx);margin-bottom:5px;word-break:break-all">${esc(w.text||w.task_desc||'')}</div>
+              <div style="display:flex;flex-direction:column;gap:3px">${issues}</div>
+            </div>`;
+          }).join('');
+        } else {
+          warnWrap.style.display = 'none';
+        }
+        modal.style.display = 'flex';
+      } catch(e) {
+        st.textContent = '预览失败：' + e.message;
+        toast('预览失败：' + e.message, 'err');
+      } finally {
+        btn.disabled = false;
       }
-      fileInp.value = '';
+    }
+
+    async function confirmUpload() {
+      if (!_pendingUploadFile) { toast('请重新选择文件','err'); return; }
+      const btn = document.getElementById('btnConfirmUpload');
+      const st  = document.getElementById('perfUploadStatus');
+      btn.disabled = true;
+      btn.textContent = '入库中…';
+      const fd = new FormData();
+      fd.append('file', _pendingUploadFile);
+      try {
+        const res = await fetch('/admin/performance/upload', {method:'POST', body:fd});
+        if (res.status === 401) { toast('登录已过期，请刷新页面重新登录', 'err'); closePreview(); return; }
+        let d;
+        try { d = await res.json(); } catch(e) { toast('服务器返回格式异常', 'err'); closePreview(); return; }
+        closePreview();
+        if (d.success) {
+          st.textContent = `✅ 入库成功：${d.count} 条记录（${d.date_range || ''}）`;
+          st.style.color = 'var(--ok)';
+          _perfCfg = await fetch('/admin/performance/config').then(r => r.json()).catch(() => _perfCfg);
+          renderPerfPeople();
+          renderFormatWarnings(d.format_warnings || []);
+          toast(d.format_warnings && d.format_warnings.length
+            ? `入库成功，${d.format_warnings.length} 处格式问题`
+            : '入库成功',
+            d.format_warnings && d.format_warnings.length ? 'warn' : 'ok');
+        } else {
+          st.textContent = d.error || '入库失败';
+          st.style.color = 'var(--err)';
+          renderFormatWarnings(d.format_warnings || []);
+          toast(d.error || '入库失败', 'err');
+        }
+      } catch(e) {
+        toast('入库失败：' + e.message, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '确认入库';
+        _pendingUploadFile = null;
+        document.getElementById('perfFile').value = '';
+        document.getElementById('btnPreview').disabled = true;
+      }
     }
 
     async function logout() {
@@ -895,9 +1249,9 @@
       { key:'mod_filter_kpi',      label:'自定义筛选项 · 图表③KPI值趋势',  def:'KPI 值趋势' },
       { key:'mod_filter_client_kpi', label:'自定义筛选项 · 图表④甲方占比（KPI）',  def:'甲方占比（KPI）' },
       { key:'mod_person_compare',  label:'人员对比 · 模块标题',         def:'人员 KPI 对比' },
-      { key:'mod_daily_charts',    label:'日常图表 · 图表-每日任务量',  def:'每日任务量' },
       { key:'mod_monthly_charts',  label:'日常图表 · 图表-月度任务量',  def:'月度任务量' },
       { key:'mod_person_charts',   label:'日常图表 · 图表-人员任务量',  def:'人员任务量' },
+      { key:'mod_person_kpi_pie',  label:'日常图表 · 图表-人员KPI占比', def:'人员KPI占比' },
       { key:'mod_detail_table',    label:'明细表 · 模块标题',           def:'明细表' },
     ];
 

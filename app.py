@@ -108,7 +108,9 @@ def init_db():
                 name TEXT NOT NULL,
                 keyword TEXT NOT NULL,
                 kpi REAL NOT NULL DEFAULT 1,
-                enabled INTEGER NOT NULL DEFAULT 1
+                enabled INTEGER NOT NULL DEFAULT 1,
+                match_mode TEXT NOT NULL DEFAULT 'contains',
+                excludes TEXT NOT NULL DEFAULT ''
             )
         """)
         cur.execute("""
@@ -120,6 +122,15 @@ def init_db():
             cur.execute("SELECT kpi FROM custom_filters LIMIT 1")
         except sqlite3.OperationalError:
             cur.execute("ALTER TABLE custom_filters ADD COLUMN kpi REAL NOT NULL DEFAULT 1")
+        # 兼容旧库：补齐 match_mode / excludes 字段
+        try:
+            cur.execute("SELECT match_mode FROM custom_filters LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE custom_filters ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'contains'")
+        try:
+            cur.execute("SELECT excludes FROM custom_filters LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE custom_filters ADD COLUMN excludes TEXT NOT NULL DEFAULT ''")
         # 兼容旧库：补齐 extra_json 字段（存储主题/标题/小数位等扩展配置）
         try:
             cur.execute("SELECT extra_json FROM app_config LIMIT 1")
@@ -182,7 +193,7 @@ def load_app_config():
 def load_config_payload():
     with get_db() as conn:
         people_rows = conn.execute("SELECT id, name, enabled FROM people ORDER BY name").fetchall()
-        filter_rows = conn.execute("SELECT id, name, keyword, kpi, enabled FROM custom_filters ORDER BY id").fetchall()
+        filter_rows = conn.execute("SELECT id, name, keyword, kpi, enabled, match_mode, excludes FROM custom_filters ORDER BY id").fetchall()
 
     people = [r["name"] for r in people_rows]
     people_enabled = [r["name"] for r in people_rows if r["enabled"]]
@@ -193,7 +204,9 @@ def load_config_payload():
             "name": r["name"],
             "keyword": r["keyword"],
             "kpi": r["kpi"],
-            "enabled": bool(r["enabled"])
+            "enabled": bool(r["enabled"]),
+            "match_mode": r["match_mode"] or "contains",
+            "excludes": r["excludes"] or ""
         }
         for r in filter_rows
     ]
@@ -253,8 +266,10 @@ def save_config_payload(payload):
                     continue
                 enabled_flag = 1 if (item or {}).get("enabled", True) else 0
                 kpi = float((item or {}).get("kpi", 1) or 1)
-                cur.execute("INSERT INTO custom_filters (name, keyword, kpi, enabled) VALUES (?, ?, ?, ?)",
-                            (name, keyword, kpi, enabled_flag))
+                match_mode = (item or {}).get("match_mode", "contains") or "contains"
+                excludes = (item or {}).get("excludes", "") or ""
+                cur.execute("INSERT INTO custom_filters (name, keyword, kpi, enabled, match_mode, excludes) VALUES (?, ?, ?, ?, ?, ?)",
+                            (name, keyword, kpi, enabled_flag, match_mode, excludes))
 
         # ── Excel 配置 ────────────────────────────────────────
         if "excel" in payload:
@@ -334,59 +349,97 @@ def _parse_task_entry(text):
     }
 
 
+# 规范检查等级：severe=严重（影响入库/统计）, normal=一般（建议修正）
+_ISSUE_LEVEL = {
+    'no_client':      'severe',
+    'no_unit':        'severe',
+    'no_quantity':    'severe',
+    'bad_separator':  'normal',
+    'fullwidth_dash': 'normal',
+    'x_multiplier':   'normal',
+    'bad_unit':       'normal',
+    'mixed_sep':      'normal',
+}
+
 def _check_format_issues(raw_cell, chunks, date_str, person, row_num):
-    """检查单元格文本的书写格式问题，返回问题列表"""
+    """检查单元格文本的书写格式问题，返回问题列表（含严重/一般等级）"""
     issues = []
     text = str(raw_cell).strip()
 
-    # 1. 使用了逗号分隔（应使用换行或分号）
-    if re.search(r'[\uff0c,]', text) and not re.search(r'[;\n；]', text):
-        # 排除纯描述中自然出现的逗号（如"A,B项目"），只在有多个任务嫌疑时报
+    def add(code, msg):
+        issues.append({'msg': msg, 'level': _ISSUE_LEVEL.get(code, 'normal'), 'code': code})
+
+    std_units = {'张', '个', '次', '套', '小时'}
+
+    # ── 严重：无甲方前缀（格式须为"甲方-任务描述"）
+    for chunk in chunks:
+        parsed = _parse_task_entry(chunk)
+        if parsed and not parsed.get('client', '').strip():
+            add('no_client',
+                '缺少甲方前缀（正确：甲方-任务描述，如"合肥-渲染*2张"）：「' + chunk + '」')
+
+    # ── 严重：有单位但无数量（如"*小时"）
+    for chunk in chunks:
+        if re.search(r'[*\xd7]\s*(张|个|次|套|小时)\s*$', chunk):
+            m2 = re.search(r'\d+(?:\.\d+)?\s*[*\xd7]\s*(张|个|次|套|小时)', chunk)
+            if not m2:
+                add('no_quantity',
+                    '单位前缺少数量（如应为"*2张"而非"*张"）：「' + chunk + '」')
+
+    # ── 严重：有数量但无单位（数量>1 且不含标准单位）
+    for chunk in chunks:
+        m = re.search(r'[*\xd7]\s*(\d+(?:\.\d+)?)\s*$', chunk.strip())
+        if m:
+            qty = float(m.group(1))
+            if qty > 1:
+                add('no_unit',
+                    '数量 ' + m.group(1) + ' 后缺少单位（标准单位：张/个/次/套/小时）：「' + chunk + '」')
+
+    # ── 一般：逗号分隔任务
+    if re.search(r'[\uff0c,]', text) and not re.search(r'[;\n\uff1b]', text):
         comma_parts = re.split(r'[\uff0c,]', text)
         if len(comma_parts) >= 2 and any(
             re.search(r'\d', p) or len(p.strip()) > 2 for p in comma_parts[1:]
         ):
-            issues.append('使用逗号分隔任务（应用换行或分号 ; ）')
+            add('bad_separator', '使用逗号分隔任务（应用换行或分号 ; ）')
 
-    # 2. 全角连字符作客户分隔（应使用半角 -）
+    # ── 一般：全角连字符
     if re.search(r'[\uff0d\u2014\u2013]', text):
-        issues.append('客户与任务之间使用了全角连字符（应使用半角 -）')
+        add('fullwidth_dash', '甲方与任务之间使用了全角连字符（应使用半角 -）')
 
-    # 3. 乘号使用小写英文 x 或 X（应使用 × 或 *）
+    # ── 一般：英文 x/X 作乘号
     for chunk in chunks:
         if re.search(r'(?:^|[^a-zA-Z])[xX](?=\d)|(?<=\d)[xX](?=[^a-zA-Z]|$)', chunk):
-            issues.append(f'数量乘号使用了英文字母 x/X（应使用 × 或 *）：「{chunk}」')
+            add('x_multiplier',
+                '数量乘号使用了英文字母 x/X（应使用 × 或 *）：「' + chunk + '」')
             break
 
-    # 4. 任务描述为空（只写了数字）
+    # ── 一般：非标准单位
+    all_units = std_units | {''}
     for chunk in chunks:
-        parsed = _parse_task_entry(chunk)
-        if parsed and not parsed['task_desc'].strip():
-            issues.append(f'任务描述为空，仅有数量：「{chunk}」')
-            break
-
-    # 5. 单位不在标准列表
-    std_units = {'张', '个', '次', '套', '小时', ''}
-    for chunk in chunks:
-        m = re.search(r'\d+(?:\.\d+)?\s*([^\d\s×*xX\n;；,，]+)$', chunk.strip())
+        m = re.search(r'\d+(?:\.\d+)?\s*([^\d\s\xd7*xX\n;,]+)$', chunk.strip())
         if m:
             unit = m.group(1).strip()
-            if unit and unit not in std_units and len(unit) <= 3:
-                issues.append(f'非标准单位「{unit}」（标准：张/个/次/套/小时）')
+            if unit and unit not in all_units and len(unit) <= 4:
+                add('bad_unit',
+                    '非标准单位「' + unit + '」（标准：张/个/次/套/小时）')
                 break
 
-    # 6. 分隔符中英混用（同时出现 ; 和 ；）
-    if ';' in text and '；' in text:
-        issues.append('分隔符中英混用（同时使用了 ; 和 ；）')
+    # ── 一般：分隔符中英混用
+    if ';' in text and '\uff1b' in text:
+        add('mixed_sep', '分隔符中英混用（同时使用了 ; 和 ；）')
 
     if not issues:
         return []
+    severe_count = sum(1 for i in issues if i['level'] == 'severe')
     return [{
         'row': row_num,
         'person': person,
         'date': date_str,
         'text': text[:80] + ('…' if len(text) > 80 else ''),
-        'issues': issues
+        'issues': issues,
+        'severe_count': severe_count,
+        'has_severe': severe_count > 0
     }]
 
 
@@ -554,8 +607,14 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get('logged_in'):
-            # API 路由返回 JSON 401，页面路由重定向到登录页
-            if request.path.startswith('/api/') or                request.headers.get('Accept', '').find('application/json') >= 0:
+            # POST/XHR 请求、/api/ 路径、Accept:json 均返回 JSON 401，其余重定向登录页
+            is_json_client = (
+                request.path.startswith('/api/')
+                or request.headers.get('Accept', '').find('application/json') >= 0
+                or request.method in ('POST', 'PUT', 'DELETE', 'PATCH')
+                or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            )
+            if is_json_client:
                 return jsonify({'error': '未登录，请先登录管理后台'}), 401
             return redirect('/admin/login')
         return f(*args, **kwargs)
@@ -614,6 +673,52 @@ def admin_performance_config():
     body = request.json or {}
     save_config_payload(body)
     return jsonify({'success': True, 'config': load_config_payload()})
+
+
+@app.route('/admin/performance/preview', methods=['POST'])
+@login_required
+def admin_performance_preview():
+    """上传预览：解析但不入库，返回将新增/覆盖的条数统计及格式问题"""
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': '请上传 Excel 文件'}), 400
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in ('xls', 'xlsx'):
+        return jsonify({'success': False, 'error': '仅支持 .xls/.xlsx'}), 400
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = os.path.join(tmp_dir, file.filename)
+    file.save(tmp_path)
+    cfg = load_config_payload()
+    records, format_warnings = _parse_perf_excel(tmp_path, cfg)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    if not records:
+        return jsonify({'success': False, 'error': '未解析到任何记录',
+                        'format_warnings': format_warnings})
+
+    new_dates = sorted({r['date'] for r in records})
+    date_min, date_max = new_dates[0], new_dates[-1]
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM performance_records WHERE date >= ? AND date <= ?",
+            (date_min, date_max)
+        ).fetchone()
+        overlap_count = row['cnt'] if row else 0
+
+    new_count = len(records)
+    people_set = sorted({r['person'] for r in records})
+    severe_count = sum(1 for w in format_warnings if w.get('has_severe'))
+
+    return jsonify({
+        'success': True,
+        'new_count': new_count,
+        'overlap_count': overlap_count,
+        'date_min': date_min,
+        'date_max': date_max,
+        'people': people_set,
+        'format_warnings': format_warnings,
+        'severe_count': severe_count
+    })
 
 
 @app.route('/admin/performance/upload', methods=['POST'])
@@ -851,17 +956,53 @@ def api_performance_summary():
         parts = re.split(r'[，,;；]+', txt)
         return [p.strip().lower() for p in parts if p and p.strip()]
 
-    def _match_keywords(desc, keyword_text):
-        source = (desc or '').lower()
-        kws = _split_keywords(keyword_text)
-        return any(kw in source for kw in kws)
+    def _match_filter(desc, flt):
+        """按筛选项规则匹配任务描述，支持 contains / exact / regex 三种模式及排除词。"""
+        source = (desc or '').strip()
+        keyword_text = (flt.get('keyword') or '').strip()
+        mode = (flt.get('match_mode') or 'contains').strip()
+        excludes_text = (flt.get('excludes') or '').strip()
+
+        if not keyword_text:
+            return False
+
+        # ── 正向匹配 ────────────────────────────────────────
+        if mode == 'exact':
+            # 精确：任意一个关键词与描述完全相等（忽略大小写）
+            kws = _split_keywords(keyword_text)
+            matched = any(kw == source.lower() for kw in kws)
+        elif mode == 'regex':
+            # 正则：任意一个关键词作为正则表达式匹配
+            kws = [p.strip() for p in re.split(r'[，,;；]+', keyword_text) if p.strip()]
+            matched = False
+            for pattern in kws:
+                try:
+                    if re.search(pattern, source, re.IGNORECASE):
+                        matched = True
+                        break
+                except re.error:
+                    pass
+        else:  # contains（默认）
+            kws = _split_keywords(keyword_text)
+            matched = any(kw in source.lower() for kw in kws)
+
+        if not matched:
+            return False
+
+        # ── 排除词过滤 ──────────────────────────────────────
+        if excludes_text:
+            excl_list = [p.strip().lower() for p in re.split(r'[，,;；]+', excludes_text) if p.strip()]
+            if any(ex in source.lower() for ex in excl_list):
+                return False
+
+        return True
 
     def _match_kpi_factor(desc):
         if not custom_filters:
             return 1.0  # 没有筛选项时，kpi_value = quantity 本身
         for flt in custom_filters:
             keyword = (flt.get('keyword') or '').strip()
-            if keyword and _match_keywords(desc, keyword):
+            if keyword and _match_filter(desc, flt):
                 return float(flt.get('kpi') or 1)
         return 0.0
 
@@ -935,7 +1076,7 @@ def api_performance_summary():
         client_kpi_map = {}
         kpi_factor = float(flt.get('kpi') or 1)
         for r in records:
-            if _match_keywords(r.get('task_desc') or '', keyword):
+            if _match_filter(r.get('task_desc') or '', flt):
                 qty = float(r.get('quantity') or 0)
                 total_qty += qty
                 total_kpi += qty * kpi_factor
@@ -963,7 +1104,7 @@ def api_performance_summary():
         client_map = {}
         client_kpi_map = {}
         for r in records:
-            if _match_keywords(r.get('task_desc') or '', keyword):
+            if _match_filter(r.get('task_desc') or '', flt):
                 client = (r.get('client') or '未填写').strip() or '未填写'
                 qty = float(r.get('quantity') or 0)
                 client_map.setdefault(client, 0)
@@ -1041,6 +1182,18 @@ def api_performance_summary():
         'by_year': _group_sum('year', 'kpi_value'),
         'by_person': _group_sum('person', 'kpi_value'),
         'records': records,
+        'unmatched_records': [
+            {
+                'date': r['date'],
+                'person': r['person'],
+                'client': r.get('client') or '',
+                'task_desc': r.get('task_desc') or '',
+                'quantity': r.get('quantity') or 0,
+                'unit': r.get('unit') or '',
+            }
+            for r in records
+            if custom_filters and r.get('kpi_factor', 1) == 0.0
+        ],
         'filter_totals': filter_totals,
         'filter_series': filter_series,
         'filter_clients': filter_clients,
@@ -1138,7 +1291,7 @@ def admin_delete_user(uid):
 
 @app.route('/api/performance/format-check')
 def api_format_check():
-    """扫描数据库中已入库的记录，检测书写不规范的条目"""
+    """扫描数据库中已入库的记录，检测书写不规范的条目（含严重/一般分级）"""
     with get_db() as conn:
         rows = conn.execute("""
             SELECT pr.id, pr.task_desc, pr.quantity, pr.unit, pr.client,
@@ -1148,70 +1301,74 @@ def api_format_check():
             ORDER BY pr.date DESC, p.name
         """).fetchall()
 
+    def _issue(code, msg):
+        return {'msg': msg, 'level': _ISSUE_LEVEL.get(code, 'normal'), 'code': code}
+
     warnings = []
     for row in rows:
-        # 把数据库里的 task_desc 还原成原始格式检查
-        # task_desc 已是单条解析结果，重新构建原始文本做检查
-        raw = row['task_desc']
-        if row['quantity'] and row['quantity'] != 1:
-            raw = f"{raw}{'×' if row['unit'] else '*'}{int(row['quantity']) if row['quantity'] == int(row['quantity']) else row['quantity']}{row['unit'] or ''}"
-        chunks = [raw]
-
         issues = []
-        text = row['task_desc']
-        unit = (row['unit'] or '').strip()
-        client = (row['client'] or '').strip()
-        qty = row['quantity']
+        text     = (row['task_desc'] or '').strip()
+        unit     = (row['unit'] or '').strip()
+        client   = (row['client'] or '').strip()
+        qty      = row['quantity'] or 0
+        std_units = {'张', '个', '次', '套', '小时'}
 
-        # 1. 全角连字符
-        if re.search(r'[－—–]', text):
-            issues.append('客户与任务之间使用了全角连字符（应使用半角 -）')
+        # ── 严重：缺少甲方前缀
+        if not client:
+            issues.append(_issue('no_client', '缺少甲方前缀（正确：甲方-任务描述，如"合肥-渲染*2张"）'))
 
-        # 2. 乘号使用英文 x/X
+        # ── 严重：有数量但无单位
+        if qty and qty != 1 and not unit:
+            qty_label = int(qty) if qty == int(qty) else qty
+            issues.append(_issue('no_unit', f'数量 {qty_label} 后缺少单位（标准：张/个/次/套/小时）'))
+
+        # ── 严重：单位存在但数量为默认1（暗示原始写了"*小时"无数量）
+        if unit and qty == 1 and re.search(r'[*×]', text):
+            issues.append(_issue('no_quantity', f'单位「{unit}」前缺少数量（如应为"*2小时"）'))
+
+        # ── 一般：全角连字符
+        if re.search(r'[－—–‐]', text):
+            issues.append(_issue('fullwidth_dash', '甲方与任务之间使用了全角连字符（应使用半角 -）'))
+
+        # ── 一般：英文 x/X 作乘号
         if re.search(r'(?:^|[^a-zA-Z])[xX](?=\d)|(?<=\d)[xX](?=[^a-zA-Z]|$)', text):
-            issues.append('数量乘号使用了英文字母 x/X（应使用 × 或 *）')
+            issues.append(_issue('x_multiplier', '数量乘号使用了英文字母 x/X（应使用 × 或 *）'))
 
-        # 3. 任务描述为空
-        if not text.strip():
-            issues.append('任务描述为空')
-
-        # 4. 单位不规范（非空但不在标准列表）
-        std_units = {'张', '个', '次', '套', '小时', ''}
+        # ── 一般：非标准单位
         if unit and unit not in std_units:
-            issues.append(f'非标准单位「{unit}」（标准：张/个/次/套/小时）')
+            issues.append(_issue('bad_unit', f'非标准单位「{unit}」（标准：张/个/次/套/小时）'))
 
-        # 5. client 与 task_desc 中出现全角符号分隔
+        # ── 一般：描述含全角逗号或顿号
         full_text = (client + '-' + text) if client else text
         if re.search(r'[，、]', full_text):
-            issues.append('描述中含全角逗号或顿号（建议使用半角）')
+            issues.append(_issue('bad_separator', '描述中含全角逗号或顿号（建议使用半角）'))
 
-        # 6. task_desc 中含疑似多任务混写（换行/分号未拆分）
-        if re.search(r'[;；\n]', text):
-            issues.append('任务描述中含分隔符（可能是多条任务未拆分）')
-
-        # 7. 未提取到甲方（client 为空，且 task_desc 中不含 - 分隔符）
-        if not client and '-' not in text:
-            issues.append('未提取到甲方（格式应为「甲方-任务描述」）')
-
-        # 8. 有数量但无单位（quantity > 1 说明原始数据写了数字，但单位为空）
-        if qty and qty != 1 and not unit:
-            issues.append(f'数量为 {int(qty) if qty == int(qty) else qty} 但未填写单位')
-
-
+        # ── 一般：任务描述含分隔符（未拆分多条）
+        if re.search(r'[;\uff1b\n]', text):
+            issues.append(_issue('mixed_sep', '任务描述中含分隔符（可能多条任务未拆分）'))
 
         if issues:
+            severe_count = sum(1 for i in issues if i['level'] == 'severe')
             warnings.append({
-                'id':     row['id'],
-                'date':   row['date'],
-                'person': row['person'],
-                'client': row['client'] or '',
-                'task_desc': row['task_desc'],
-                'quantity': row['quantity'],
-                'unit':   row['unit'] or '',
-                'issues': issues
+                'id':          row['id'],
+                'date':        row['date'],
+                'person':      row['person'],
+                'client':      client,
+                'task_desc':   text,
+                'quantity':    qty,
+                'unit':        unit,
+                'issues':      issues,
+                'severe_count': severe_count,
+                'has_severe':  severe_count > 0
             })
 
-    return jsonify({'warnings': warnings, 'total': len(rows), 'issue_count': len(warnings)})
+    severe_total = sum(1 for w in warnings if w['has_severe'])
+    return jsonify({
+        'warnings':     warnings,
+        'total':        len(rows),
+        'issue_count':  len(warnings),
+        'severe_total': severe_total
+    })
 
 
 @app.route('/api/performance/export', methods=['POST'])
