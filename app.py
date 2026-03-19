@@ -9,11 +9,15 @@ import shutil
 import io
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'performance-pulse-secret')
+
+# 本地开发默认开启模板热更新（改 HTML/CSS/JS 无需重启）
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.auto_reload = True
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 # 优先用环境变量；否则尝试在项目目录建 data/，失败则用 /tmp（Railway 只读文件系统）
@@ -272,7 +276,7 @@ def save_config_payload(payload):
                     old_extra = json.loads(row["extra_json"])
             except Exception:
                 pass
-            extra_keys = ["module_order", "hidden_modules", "stats_order", "footer_items", "favicon_url", "default_theme", "titles", "decimal_places"]
+            extra_keys = ["module_order", "hidden_modules", "stats_order", "hidden_stats", "footer_items", "favicon_url", "date_format", "default_theme", "titles", "decimal_places", "target_value", "target_config"]
             new_extra  = {k: app_cfg[k] for k in extra_keys if k in app_cfg}
             merged     = {**old_extra, **new_extra}
             chart_js_url = app_cfg.get("chart_js_url", "")
@@ -386,6 +390,95 @@ def _check_format_issues(raw_cell, chunks, date_str, person, row_num):
     }]
 
 
+def _split_keywords(keyword_text: str):
+    parts = re.split(r'[，,；;]+', str(keyword_text or '').strip())
+    return [p.strip().lower() for p in parts if p and p.strip()]
+
+
+def _match_keywords(text: str, keyword_text: str) -> bool:
+    hay = str(text or '').lower()
+    kws = _split_keywords(keyword_text)
+    if not kws:
+        return False
+    return any(k in hay for k in kws)
+
+
+def _build_period_compare(records):
+    def _sum_in_range(start_dt, end_dt):
+        s = 0.0
+        for r in records:
+            ds = r.get('date')
+            if not ds:
+                continue
+            try:
+                d = datetime.strptime(ds, '%Y-%m-%d').date()
+            except Exception:
+                continue
+            if start_dt <= d <= end_dt:
+                s += float(r.get('kpi_value') or 0)
+        return round(s, 4)
+
+    if not records:
+        return {
+            'week': {'current': 0, 'previous': 0, 'change_pct': None, 'text': '暂无数据'},
+            'month': {'current': 0, 'previous': 0, 'change_pct': None},
+            'yoy_month': {'current': 0, 'previous': 0, 'change_pct': None}
+        }
+
+    date_list = []
+    for r in records:
+        ds = r.get('date')
+        if not ds:
+            continue
+        try:
+            date_list.append(datetime.strptime(ds, '%Y-%m-%d').date())
+        except Exception:
+            pass
+    if not date_list:
+        return {
+            'week': {'current': 0, 'previous': 0, 'change_pct': None, 'text': '暂无数据'},
+            'month': {'current': 0, 'previous': 0, 'change_pct': None},
+            'yoy_month': {'current': 0, 'previous': 0, 'change_pct': None}
+        }
+
+    end_date = max(date_list)
+
+    week_start = end_date - timedelta(days=6)
+    prev_week_end = week_start - timedelta(days=1)
+    prev_week_start = prev_week_end - timedelta(days=6)
+    wk_cur = _sum_in_range(week_start, end_date)
+    wk_prev = _sum_in_range(prev_week_start, prev_week_end)
+    wk_pct = ((wk_cur - wk_prev) / wk_prev) if wk_prev else None
+    if wk_pct is None:
+        wk_text = '本周较上周：暂无对比基数'
+    else:
+        sign = '+' if wk_pct >= 0 else ''
+        wk_text = f"本周较上周 {sign}{wk_pct * 100:.1f}%"
+
+    month_start = end_date.replace(day=1)
+    prev_month_end = month_start - timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
+    mo_cur = _sum_in_range(month_start, end_date)
+    mo_prev = _sum_in_range(prev_month_start, prev_month_end)
+    mo_pct = ((mo_cur - mo_prev) / mo_prev) if mo_prev else None
+
+    last_year_same = end_date.replace(year=end_date.year - 1)
+    ly_month_start = last_year_same.replace(day=1)
+    if end_date.month == 12:
+        ly_month_end = ly_month_start.replace(year=ly_month_start.year + 1, month=1) - timedelta(days=1)
+    else:
+        ly_month_end = ly_month_start.replace(month=ly_month_start.month + 1) - timedelta(days=1)
+    yoy_cur = _sum_in_range(month_start, end_date)
+    yoy_prev = _sum_in_range(ly_month_start, ly_month_end)
+    yoy_pct = ((yoy_cur - yoy_prev) / yoy_prev) if yoy_prev else None
+
+    return {
+        'week': {'current': wk_cur, 'previous': wk_prev, 'change_pct': wk_pct, 'text': wk_text},
+        'month': {'current': mo_cur, 'previous': mo_prev, 'change_pct': mo_pct},
+        'yoy_month': {'current': yoy_cur, 'previous': yoy_prev, 'change_pct': yoy_pct}
+    }
+
+
 def _parse_perf_excel(file_path, cfg):
     ext = os.path.splitext(file_path)[1].lower()
     if ext == '.xls':
@@ -479,6 +572,7 @@ def admin_login():
             row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if row and hash_pw(password) == row['password_hash']:
             session['logged_in'] = True
+            session['username'] = row['username']
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
     if session.get('logged_in'):
@@ -708,16 +802,17 @@ def api_performance_summary():
     date_from = request.args.get('from', '').strip()
     date_to = request.args.get('to', '').strip()
 
-    filters = []
-    params = []
+    person_filters = []
+    person_params = []
     if person:
-        filters.append('p.name = ?')
-        params.append(person)
+        person_filters.append('p.name = ?')
+        person_params.append(person)
     elif cfg.get('people_enabled'):
-        filters.append('p.name IN (%s)' % (','.join(['?'] * len(cfg['people_enabled']))))
-        params.extend(cfg['people_enabled'])
+        person_filters.append('p.name IN (%s)' % (','.join(['?'] * len(cfg['people_enabled']))))
+        person_params.extend(cfg['people_enabled'])
 
-
+    filters = list(person_filters)
+    params = list(person_params)
     if date_from:
         filters.append('pr.date >= ?')
         params.append(date_from)
@@ -726,6 +821,7 @@ def api_performance_summary():
         params.append(date_to)
 
     where_sql = ('WHERE ' + ' AND '.join(filters)) if filters else ''
+    where_sql_person = ('WHERE ' + ' AND '.join(person_filters)) if person_filters else ''
 
     with get_db() as conn:
         rows = conn.execute(f"""
@@ -735,21 +831,45 @@ def api_performance_summary():
             {where_sql}
             ORDER BY pr.date ASC
         """, params).fetchall()
+        rows_for_compare = conn.execute(f"""
+            SELECT pr.*, p.name AS person
+            FROM performance_records pr
+            JOIN people p ON pr.person_id = p.id
+            {where_sql_person}
+            ORDER BY pr.date ASC
+        """, person_params).fetchall()
 
     records = [dict(r) for r in rows]
+    compare_records = [dict(r) for r in rows_for_compare]
 
     custom_filters = [f for f in (cfg.get('custom_filters') or []) if f.get('enabled')]
+
+    def _split_keywords(keyword_text):
+        txt = (keyword_text or '').strip()
+        if not txt:
+            return []
+        parts = re.split(r'[，,;；]+', txt)
+        return [p.strip().lower() for p in parts if p and p.strip()]
+
+    def _match_keywords(desc, keyword_text):
+        source = (desc or '').lower()
+        kws = _split_keywords(keyword_text)
+        return any(kw in source for kw in kws)
 
     def _match_kpi_factor(desc):
         if not custom_filters:
             return 1.0  # 没有筛选项时，kpi_value = quantity 本身
         for flt in custom_filters:
             keyword = (flt.get('keyword') or '').strip()
-            if keyword and keyword in (desc or ''):
+            if keyword and _match_keywords(desc, keyword):
                 return float(flt.get('kpi') or 1)
         return 0.0
 
     for r in records:
+        factor = _match_kpi_factor(r.get('task_desc') or '')
+        r['kpi_factor'] = factor
+        r['kpi_value'] = round(float(r.get('quantity') or 0) * factor, 4)
+    for r in compare_records:
         factor = _match_kpi_factor(r.get('task_desc') or '')
         r['kpi_factor'] = factor
         r['kpi_value'] = round(float(r.get('quantity') or 0) * factor, 4)
@@ -760,6 +880,17 @@ def api_performance_summary():
         'total_people': len({r['person'] for r in records}),
         'total_days': len({r['date'] for r in records})
     }
+
+    target_cfg = ((cfg.get('app') or {}).get('target_config') or {})
+    default_target = (target_cfg.get('global')
+                      if target_cfg.get('global') not in (None, '', 0)
+                      else (cfg.get('app') or {}).get('target_value'))
+    by_month = target_cfg.get('by_month') or {}
+    by_person = target_cfg.get('by_person') or {}
+    by_filter = target_cfg.get('by_filter') or {}
+    selected_month = date_to[:7] if date_to else (records[-1]['date'][:7] if records else '')
+
+    compare = _build_period_compare(compare_records)
 
     def _group_sum(key, value_key='kpi_value'):
         out = {}
@@ -804,7 +935,7 @@ def api_performance_summary():
         client_kpi_map = {}
         kpi_factor = float(flt.get('kpi') or 1)
         for r in records:
-            if keyword in (r.get('task_desc') or ''):
+            if _match_keywords(r.get('task_desc') or '', keyword):
                 qty = float(r.get('quantity') or 0)
                 total_qty += qty
                 total_kpi += qty * kpi_factor
@@ -832,7 +963,7 @@ def api_performance_summary():
         client_map = {}
         client_kpi_map = {}
         for r in records:
-            if keyword in (r.get('task_desc') or ''):
+            if _match_keywords(r.get('task_desc') or '', keyword):
                 client = (r.get('client') or '未填写').strip() or '未填写'
                 qty = float(r.get('quantity') or 0)
                 client_map.setdefault(client, 0)
@@ -869,8 +1000,42 @@ def api_performance_summary():
             ]
         }
 
+    layered_target = None
+    target_source = 'global'
+    if selected_month and selected_month in by_month:
+        layered_target = by_month[selected_month]
+        target_source = f'month:{selected_month}'
+    elif person and person in by_person:
+        layered_target = by_person[person]
+        target_source = f'person:{person}'
+    elif by_filter and filter_totals:
+        hit = None
+        for ft in filter_totals:
+            nm = ft.get('name')
+            if nm in by_filter:
+                hit = nm
+                break
+        if hit:
+            layered_target = by_filter[hit]
+            target_source = f'filter:{hit}'
+    if layered_target in (None, '', 0):
+        layered_target = default_target
+        target_source = 'global'
+
     resp = jsonify({
         'totals': totals,
+        'insights': {
+            'trend_text': compare['week']['text'],
+            'week_vs_last': compare['week'],
+            'month_vs_last': compare['month'],
+            'yoy_month': compare['yoy_month'],
+            'target': {
+                'value': layered_target,
+                'source': target_source,
+                'month': selected_month,
+                'config': target_cfg
+            }
+        },
         'by_day': _group_sum('date', 'kpi_value'),
         'by_month': _group_sum('month', 'kpi_value'),
         'by_year': _group_sum('year', 'kpi_value'),
@@ -890,6 +1055,85 @@ def api_performance_summary():
     })
     resp.headers['Cache-Control'] = 'no-store'
     return resp
+
+
+# ── 账号管理 API ──────────────────────────────────────────────
+
+@app.route('/admin/users', methods=['GET'])
+@login_required
+def admin_list_users():
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, username, role FROM users ORDER BY id").fetchall()
+    return jsonify({'users': [dict(r) for r in rows]})
+
+
+@app.route('/admin/users', methods=['POST'])
+@login_required
+def admin_create_user():
+    data = request.get_json(force=True) or {}
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '').strip()
+    role     = (data.get('role') or 'admin').strip()
+    if not username or not password:
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+    if len(password) < 4:
+        return jsonify({'error': '密码长度至少 4 位'}), 400
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, hash_pw(password), role)
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({'error': f'用户名「{username}」已存在'}), 409
+    return jsonify({'ok': True, 'message': f'账号「{username}」创建成功'})
+
+
+@app.route('/admin/users/<int:uid>', methods=['PUT'])
+@login_required
+def admin_update_user(uid):
+    data = request.get_json(force=True) or {}
+    new_username = (data.get('username') or '').strip()
+    new_password = (data.get('password') or '').strip()
+    if not new_username and not new_password:
+        return jsonify({'error': '请提供新用户名或新密码'}), 400
+    if new_password and len(new_password) < 4:
+        return jsonify({'error': '密码长度至少 4 位'}), 400
+    with get_db() as conn:
+        row = conn.execute("SELECT id, username FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            return jsonify({'error': '用户不存在'}), 404
+        if new_username and new_username != row['username']:
+            exist = conn.execute("SELECT id FROM users WHERE username=? AND id!=?",
+                                  (new_username, uid)).fetchone()
+            if exist:
+                return jsonify({'error': f'用户名「{new_username}」已被占用'}), 409
+            conn.execute("UPDATE users SET username=? WHERE id=?", (new_username, uid))
+        if new_password:
+            conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                         (hash_pw(new_password), uid))
+        conn.commit()
+    return jsonify({'ok': True, 'message': '账号信息已更新'})
+
+
+@app.route('/admin/users/<int:uid>', methods=['DELETE'])
+@login_required
+def admin_delete_user(uid):
+    with get_db() as conn:
+        # 禁止删除最后一个账号
+        cnt = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()['n']
+        if cnt <= 1:
+            return jsonify({'error': '至少保留一个账号，无法删除'}), 400
+        # 禁止删除自己（防止自锁）
+        row = conn.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            return jsonify({'error': '用户不存在'}), 404
+        if row['username'] == session.get('username'):
+            return jsonify({'error': '不能删除当前登录的账号'}), 400
+        conn.execute("DELETE FROM users WHERE id=?", (uid,))
+        conn.commit()
+    return jsonify({'ok': True, 'message': '账号已删除'})
 
 
 @app.route('/api/performance/format-check')
@@ -1013,5 +1257,5 @@ init_db()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    debug = os.environ.get('FLASK_DEBUG', '1') == '1'
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=debug)

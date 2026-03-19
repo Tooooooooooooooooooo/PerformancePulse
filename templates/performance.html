@@ -102,6 +102,13 @@
       </div>
     </div>
 
+    <div class="card" id="insightCard" style="margin-bottom:14px">
+      <div class="ct">🧭 趋势解读</div>
+      <div id="trendLine" style="font-size:13px;color:var(--tx);margin-bottom:10px">-</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:8px">📊 对比视图：本月 vs 上月、今年 vs 去年同月</div>
+      <div class="stats" id="compareStats" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px"></div>
+    </div>
+
     <!-- KPI 总量趋势（独立模块） -->
     <div class="card" id="kpiTrendCard" style="display:none">
       <div class="ct">📈 KPI 总量趋势</div>
@@ -206,6 +213,32 @@
     </footer>
   </div>
 
+  <!-- 下钻抽屉 -->
+  <div id="drillOverlay" onclick="closeDrill()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;backdrop-filter:blur(2px)"></div>
+  <div id="drillDrawer" style="position:fixed;bottom:0;left:0;right:0;max-height:72vh;background:var(--s1);border-top:2px solid var(--ac);border-radius:16px 16px 0 0;z-index:901;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .32s cubic-bezier(.4,0,.2,1);visibility:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 10px;border-bottom:1px solid var(--bd);flex-shrink:0">
+      <div>
+        <div id="drillTitle" style="font-size:15px;font-weight:700;color:var(--tx)"></div>
+        <div id="drillSub" style="font-size:11px;color:var(--mu);margin-top:3px"></div>
+      </div>
+      <button onclick="closeDrill()" style="background:none;border:none;color:var(--mu);font-size:22px;cursor:pointer;padding:4px 10px;line-height:1;border-radius:6px">×</button>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding-bottom:20px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="position:sticky;top:0;background:var(--s1);z-index:1">
+            <th style="padding:8px 14px;text-align:left;color:var(--mu);font-weight:600;border-bottom:1px solid var(--bd);white-space:nowrap">日期</th>
+            <th style="padding:8px 14px;text-align:left;color:var(--mu);font-weight:600;border-bottom:1px solid var(--bd);white-space:nowrap">人员</th>
+            <th style="padding:8px 14px;text-align:left;color:var(--mu);font-weight:600;border-bottom:1px solid var(--bd);white-space:nowrap">甲方</th>
+            <th style="padding:8px 14px;text-align:left;color:var(--mu);font-weight:600;border-bottom:1px solid var(--bd)">任务</th>
+            <th style="padding:8px 14px;text-align:right;color:var(--mu);font-weight:600;border-bottom:1px solid var(--bd);white-space:nowrap">数量</th>
+          </tr>
+        </thead>
+        <tbody id="drillBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <script>
     // ── 配色方案 ─────────────────────────────────────────────
     const THEMES = [
@@ -307,7 +340,7 @@
     let activeCustomFilter = '';
     let totalKpiLineVisible = false;
     let selectedPersons = [];
-    let _statsOrder = ['total_kpi', 'forecast', 'people', 'days']; // 默认顺序
+    let _statsOrder = ['total_kpi', 'task_progress', 'forecast', 'people', 'days', 'absent_days']; // 默认顺序
     let selectedClients = null;   // null = 全选，Set = 部分选中
     let chartClientKpi = null;
     let chartClientKpiPie = null;       // 当前已选中的人员列表
@@ -365,6 +398,7 @@
       if (appCfg.stats_order && appCfg.stats_order.length) {
         _statsOrder = appCfg.stats_order;
       }
+      if (appCfg.date_format) _dateFormat = appCfg.date_format;
       renderFooter(appCfg.footer_items || []);
       renderStats();
       renderCustomFilterStats();
@@ -570,7 +604,7 @@
       chartOverallKpi && chartOverallKpi.destroy();
       chartOverallKpi = new Chart(ctx, {
         type: 'line',
-        data: { labels: dates, datasets: finalDatasets },
+        data: { labels: dates.map(fmtDateLabel), datasets: finalDatasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: true, labels: { color: '#cfcbe0', font: { size: 11 }, boxWidth: 12, padding: 10 } } },
@@ -761,7 +795,7 @@
 
       chartClientKpi = new Chart(ctx, {
         type: 'line',
-        data: { labels: dates, datasets },
+        data: { labels: dates.map(fmtDateLabel), datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false } },
@@ -942,7 +976,7 @@
 
       chartPersonCompare = new Chart(ctx, {
         type: 'line',
-        data: { labels: dates, datasets },
+        data: { labels: dates.map(fmtDateLabel), datasets },
         options: {
           responsive: true, maintainAspectRatio: false,
           layout: { padding: { top: 28 } },
@@ -1016,7 +1050,9 @@
               x: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
               y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
             },
-            plugins: { legend: { display: false } }
+            plugins: { legend: { display: false } },
+            onClick: (evt, els, chart) => { if (els.length) drillByFilterDate(chart.data.labels[els[0].index]); },
+            onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
           },
           plugins: [valueLabelPlugin]
         });
@@ -1044,7 +1080,9 @@
               x: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
               y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
             },
-            plugins: { legend: { display: false } }
+            plugins: { legend: { display: false } },
+            onClick: (evt, els, chart) => { if (els.length) drillByFilterDate(chart.data.labels[els[0].index]); },
+            onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
           },
           plugins: [valueLabelPlugin]
         });
@@ -1068,7 +1106,9 @@
             scales: {
               x: { ticks: { color: '#cfcbe0', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(255,255,255,.05)' } },
               y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
-            }
+            },
+            onClick: (evt, els, chart) => { if (els.length) drillByFilterClient(chart.data.labels[els[0].index]); },
+            onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
           },
           plugins: [valueLabelPlugin]
         });
@@ -1092,7 +1132,9 @@
             scales: {
               x: { ticks: { color: '#cfcbe0', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(255,255,255,.05)' } },
               y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
-            }
+            },
+            onClick: (evt, els, chart) => { if (els.length) drillByFilterClient(chart.data.labels[els[0].index]); },
+            onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
           },
           plugins: [valueLabelPlugin]
         });
@@ -1116,10 +1158,22 @@
     function renderStats() {
       const t = perfData.totals || {};
       const filterKpiTotal = (perfData.filter_totals || []).reduce((s, f) => s + (Number(f.kpi_value) || 0), 0);
+      const peopleCount = Number(t.total_people || 0);
+      const targetInfo = (perfData.insights || {}).target || {};
+      const targetValue = Number(targetInfo.value || 0);
+      const progressValue = (targetValue > 0 && peopleCount > 0)
+        ? (filterKpiTotal / (targetValue * peopleCount))
+        : null;
 
       // 各指标的 HTML 生成器（按需构建，不含 absent）
       const STAT_BUILDERS = {
         total_kpi: () => `<div class="stat"><div class="sv" id="sTotalQty">${fmtNum(filterKpiTotal)}</div><div class="sl">任务总量（KPI）</div></div>`,
+        task_progress: () => {
+          const progressText = progressValue !== null ? `${(progressValue * 100).toFixed(1)}%` : '-';
+          const targetText = targetValue > 0 ? fmtNum(targetValue) : '-';
+          const sourceText = targetInfo.source ? `（来源：${targetInfo.source}）` : '';
+          return `<div class="stat"><div class="sv">${progressText}</div><div class="sl">任务进度</div><div style="font-size:10px;color:var(--mu);margin-top:4px">目标值：${targetText}${sourceText}</div></div>`;
+        },
         forecast:  () => {
           // 预测卡片占位，实际内容由 renderForecast 填充
           return `<div class="stat" id="sForecastWrap" style="display:none;border-color:rgba(200,169,126,.4);position:relative;overflow:hidden">
@@ -1138,32 +1192,72 @@
 
       const wrap = document.getElementById('statsWrap');
       const absentEl = document.getElementById('sAbsentWrap');
+      const hiddenStats = new Set(((allPerfData?.config?.app || perfData?.config?.app || {}).hidden_stats) || []);
+
+      if (hiddenStats.has('absent_days')) {
+        absentEl.style.display = 'none';
+      }
 
       // 按 _statsOrder 顺序插入到 absentWrap 之前
       const order = (_statsOrder || []).filter(k => STAT_BUILDERS[k]);
       // 补上未在 order 里的指标
       Object.keys(STAT_BUILDERS).forEach(k => { if (!order.includes(k)) order.push(k); });
+      const visibleOrder = order.filter(k => !hiddenStats.has(k));
 
       // 先移除旧的动态卡片（保留 sAbsentWrap）
       Array.from(wrap.children).forEach(el => {
         if (el.id !== 'sAbsentWrap') el.remove();
       });
 
-      // 按顺序插入到 absentWrap 前
-      order.forEach(key => {
+      // 按顺序插入到 absentWrap 前（只渲染可见指标）
+      visibleOrder.forEach(key => {
         const html = STAT_BUILDERS[key]();
         const tmp = document.createElement('div');
         tmp.innerHTML = html.trim();
         wrap.insertBefore(tmp.firstElementChild, absentEl);
       });
 
-      renderForecast(filterKpiTotal);
-      renderAbsent();
+      const showAbsent = !hiddenStats.has('absent_days');
+      renderForecast(filterKpiTotal, visibleOrder.includes('forecast'));
+      renderAbsent(showAbsent);
+      renderInsights();
     }
 
-    function renderAbsent() {
+    function fmtPct(p) {
+      if (p === null || p === undefined || Number.isNaN(Number(p))) return '-';
+      const n = Number(p) * 100;
+      const sign = n > 0 ? '+' : '';
+      return `${sign}${n.toFixed(1)}%`;
+    }
+
+    function renderInsights() {
+      const ins = perfData.insights || {};
+      const trend = ins.trend_text || '暂无趋势数据';
+      document.getElementById('trendLine').textContent = trend;
+
+      const mv = ins.month_vs_last || {};
+      const yv = ins.yoy_month || {};
+      const hasMonthCompare = (mv.current !== undefined || mv.previous !== undefined || mv.change_pct !== undefined);
+      const hasYoyCompare = (yv.current !== undefined || yv.previous !== undefined || yv.change_pct !== undefined);
+
+      const wrap = document.getElementById('compareStats');
+      if (!hasMonthCompare && !hasYoyCompare) {
+        wrap.innerHTML = `<div class="stat" style="grid-column:1/-1"><div class="sl">暂无可展示的对比数据</div></div>`;
+        return;
+      }
+
+      wrap.innerHTML = `
+        <div class="stat"><div class="sv">${fmtNum(mv.current ?? 0)}</div><div class="sl">本月 KPI</div><div class="sl">较上月 ${fmtPct(mv.change_pct)}</div></div>
+        <div class="stat"><div class="sv">${fmtNum(mv.previous ?? 0)}</div><div class="sl">上月 KPI</div><div class="sl">环比基数</div></div>
+        <div class="stat"><div class="sv">${fmtNum(yv.current ?? 0)}</div><div class="sl">本月 KPI（同比）</div><div class="sl">较去年同月 ${fmtPct(yv.change_pct)}</div></div>
+        <div class="stat"><div class="sv">${fmtNum(yv.previous ?? 0)}</div><div class="sl">去年同月 KPI</div><div class="sl">同比基数</div></div>
+      `;
+    }
+
+    function renderAbsent(visible = true) {
       const wrap = document.getElementById('sAbsentWrap');
       const list = document.getElementById('sAbsentList');
+      if (!visible) { wrap.style.display = 'none'; return; }
       const records = perfData.records || [];
       if (!records.length) { wrap.style.display = 'none'; return; }
 
@@ -1222,11 +1316,29 @@
 
     function fmtNum(v) { return fmtVal(v); }
 
-    function renderForecast(currentKpi) {
+    // 图表 x 轴日期格式化：去掉年份，只显示月/日
+    function fmtDateLabel(raw) {
+      if (!raw) return raw;
+      const s = String(raw);
+      if (_dateFormat === 'ymd') {
+        // 年-月-日：原样返回
+        return s;
+      }
+      // 默认 md：只显示月/日
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(5).replace('-', '/');
+      if (/^\d{4}-\d{2}$/.test(s)) return s.slice(5) + '月';
+      return s;
+    }
+
+    function renderForecast(currentKpi, forecastVisible = true) {
       const wrap = document.getElementById('sForecastWrap');
       const valEl = document.getElementById('sForecast');
       const labelEl = document.getElementById('sForecastLabel');
       const metaEl = document.getElementById('sForecastMeta');
+      if (!forecastVisible || !wrap || !valEl || !labelEl || !metaEl) {
+        if (wrap) wrap.style.display = 'none';
+        return;
+      }
 
       // 判断是否存在日期筛选，若有则不预测
       const fromVal = document.getElementById('fFrom').value;
@@ -1285,10 +1397,110 @@
       metaEl.textContent = `已过 ${daysPassed}/${daysInMonth} 天（${progressPct}%）· 已完成 ${fmtNum(monthKpi)}`;
     }
 
-    function chartConfig(labels, values, label, color) {
+    // ── 数据下钻 ─────────────────────────────────────────────
+    let _drillOpen = false;
+
+    function openDrill(title, sub, rows) {
+      const overlay = document.getElementById('drillOverlay');
+      const drawer  = document.getElementById('drillDrawer');
+      const body    = document.getElementById('drillBody');
+      document.getElementById('drillTitle').textContent = title;
+      document.getElementById('drillSub').textContent   = sub;
+
+      body.innerHTML = rows.length ? rows.map(r => `
+        <tr style="border-bottom:1px solid var(--bd);transition:background .15s" onmouseover="this.style.background='var(--s2)'" onmouseout="this.style.background=''">
+          <td style="padding:8px 14px;color:var(--mu);white-space:nowrap">${r.date}</td>
+          <td style="padding:8px 14px;color:var(--tx);white-space:nowrap">${r.person}</td>
+          <td style="padding:8px 14px;color:var(--ac);white-space:nowrap">${r.client || '-'}</td>
+          <td style="padding:8px 14px;color:var(--tx)">${r.task_desc}</td>
+          <td style="padding:8px 14px;text-align:right;color:var(--tx);white-space:nowrap;font-variant-numeric:tabular-nums">${fmtVal(r.kpi_value ?? r.quantity)}${r.unit || ''}</td>
+        </tr>`).join('') :
+        `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--mu)">暂无明细数据</td></tr>`;
+
+      overlay.style.display = 'block';
+      drawer.style.visibility = 'visible';
+      requestAnimationFrame(() => { drawer.style.transform = 'translateY(0)'; });
+      _drillOpen = true;
+    }
+
+    function closeDrill() {
+      const drawer  = document.getElementById('drillDrawer');
+      const overlay = document.getElementById('drillOverlay');
+      drawer.style.transform = 'translateY(100%)';
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        drawer.style.visibility = 'hidden';
+      }, 320);
+      _drillOpen = false;
+    }
+
+    // ESC 关闭
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && _drillOpen) closeDrill(); });
+
+    function drillByDate(dateLabel) {
+      // dateLabel 是格式化后的（03/12 或 2026-03-12），需匹配原始 date 字段
+      const recs = (perfData.records || []).filter(r => {
+        const fmt = fmtDateLabel(r.date);
+        return fmt === dateLabel || r.date === dateLabel;
+      });
+      const total = recs.reduce((s, r) => s + (r.kpi_value ?? 0), 0);
+      openDrill(`📅 ${dateLabel} 明细`, `共 ${recs.length} 条记录，KPI 合计 ${fmtVal(total)}`, recs);
+    }
+
+    function drillByMonth(monthLabel) {
+      const recs = (perfData.records || []).filter(r => {
+        const fmt = fmtDateLabel(r.month);
+        return fmt === monthLabel || r.month === monthLabel;
+      });
+      const total = recs.reduce((s, r) => s + (r.kpi_value ?? 0), 0);
+      openDrill(`📆 ${monthLabel} 明细`, `共 ${recs.length} 条记录，KPI 合计 ${fmtVal(total)}`, recs);
+    }
+
+    function drillByPerson(person) {
+      const recs = (perfData.records || []).filter(r => r.person === person);
+      const total = recs.reduce((s, r) => s + (r.kpi_value ?? 0), 0);
+      openDrill(`👤 ${person} 明细`, `共 ${recs.length} 条记录，KPI 合计 ${fmtVal(total)}`, recs);
+    }
+    function splitKeywords(text) {
+      return String(text || '').split(/[，,；;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+    }
+
+    function isRecordMatchedByActiveFilter(r) {
+      if (!activeCustomFilter) return true;
+      const cfs = (perfData?.config?.custom_filters || []).filter(f => f && f.enabled);
+      const item = cfs.find(f => f.name === activeCustomFilter);
+      if (!item) return true;
+      const kws = splitKeywords(item.keyword || '');
+      if (!kws.length) return true;
+      const text = `${r.task_desc || ''} ${r.client || ''}`.toLowerCase();
+      return kws.some(kw => text.includes(kw));
+    }
+
+    function drillByFilterDate(dateLabel) {
+      const filterName = activeCustomFilter || '筛选项';
+      const recs = (perfData.records || []).filter(r => {
+        if (!isRecordMatchedByActiveFilter(r)) return false;
+        return fmtDateLabel(r.date) === dateLabel || r.date === dateLabel;
+      });
+      const total = recs.reduce((s, r) => s + (r.kpi_value ?? 0), 0);
+      openDrill(`📅 ${filterName} · ${dateLabel} 明细`, `共 ${recs.length} 条记录，KPI 合计 ${fmtVal(total)}`, recs);
+    }
+
+    function drillByFilterClient(client) {
+      const filterName = activeCustomFilter || '筛选项';
+      const recs = (perfData.records || []).filter(r => {
+        if (!isRecordMatchedByActiveFilter(r)) return false;
+        return (r.client || '') === client;
+      });
+      const total = recs.reduce((s, r) => s + (r.kpi_value ?? 0), 0);
+      openDrill(`🏢 ${filterName} · ${client} 明细`, `共 ${recs.length} 条记录，KPI 合计 ${fmtVal(total)}`, recs);
+    }
+    // ─────────────────────────────────────────────────────────
+
+    function chartConfig(labels, values, label, color, onClickFn) {
       return {
         type: 'bar',
-        data: { labels, datasets: [{ label, data: values, backgroundColor: color }] },
+        data: { labels, datasets: [{ label, data: values, backgroundColor: color, hoverBackgroundColor: color.replace(/[\d.]+\)$/, '1)') }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           layout: { padding: { top: 28 } },
@@ -1296,7 +1508,14 @@
           scales: {
             x: { ticks: { color: '#cfcbe0', font: { size: 10 }, maxRotation: 45 }, grid: { color: 'rgba(255,255,255,.05)' } },
             y: { ticks: { color: '#cfcbe0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true, grace: '8%' }
-          }
+          },
+          onClick: onClickFn ? (evt, els, chart) => {
+            if (!els.length) return;
+            onClickFn(chart.data.labels[els[0].index]);
+          } : undefined,
+          onHover: onClickFn ? (evt, els) => {
+            evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+          } : undefined,
         },
         plugins: [valueLabelPlugin]
       };
@@ -1312,10 +1531,10 @@
       chartMonth && chartMonth.destroy();
       chartPerson && chartPerson.destroy();
 
-      chartDay = new Chart(document.getElementById('chartDay'), chartConfig(byDay.map(i=>i.label), byDay.map(i=>i.value), '数量', 'rgba(200,169,126,.6)'));
-      chartMonth = new Chart(document.getElementById('chartMonth'), chartConfig(byMonth.map(i=>i.label), byMonth.map(i=>i.value), '数量', 'rgba(124,106,245,.55)'));
+      chartDay = new Chart(document.getElementById('chartDay'), chartConfig(byDay.map(i=>fmtDateLabel(i.label)), byDay.map(i=>i.value), '数量', 'rgba(200,169,126,.6)', drillByDate));
+      chartMonth = new Chart(document.getElementById('chartMonth'), chartConfig(byMonth.map(i=>fmtDateLabel(i.label)), byMonth.map(i=>i.value), '数量', 'rgba(124,106,245,.55)', drillByMonth));
 
-      chartPerson = new Chart(document.getElementById('chartPerson'), chartConfig(byPerson.map(i=>i.label), byPerson.map(i=>i.value), '数量', 'rgba(92,184,92,.55)'));
+      chartPerson = new Chart(document.getElementById('chartPerson'), chartConfig(byPerson.map(i=>i.label), byPerson.map(i=>i.value), '数量', 'rgba(92,184,92,.55)', drillByPerson));
     }
 
     function renderTable() {
@@ -1387,7 +1606,9 @@
 
     // 模块顺序排列
     const MODULE_BLOCKS = [
+      { key: 'stats_panel',    id: 'statsWrap' },
       { key: 'kpi_trend',      id: 'kpiTrendCard' },
+      { key: 'insight',        id: 'insightCard' },
       { key: 'filter_stats',   id: 'customFilterCard' },
       { key: 'client_kpi',     id: 'clientKpiCard' },
       { key: 'person_compare', id: 'personCompareCard' },

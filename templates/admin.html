@@ -9,14 +9,26 @@
     :root{--bg:#0f0f13;--s1:#1a1a22;--s2:#22222e;--s3:#2a2a38;--bd:#2e2e3e;--ac:#c8a97e;--ac2:#7c6af5;--tx:#e8e6f0;--mu:#6b6880;--err:#e05c5c;--ok:#5cb85c;--warn:#f0a030}
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--tx)}
-    .wrap{max-width:1200px;margin:0 auto;padding:28px 20px 40px}
+    .wrap{max-width:1400px;margin:0 auto;padding:22px 20px 40px}
     .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:16px}
     .title{font-size:22px;font-weight:600}
     .sub{font-size:12px;color:var(--mu)}
     .btn{padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:none;font-family:inherit;transition:.2s;font-weight:500}
+    .layout{display:grid;grid-template-columns:240px 1fr;gap:16px}
+    .sidebar{position:sticky;top:18px;align-self:start;background:var(--s1);border:1px solid var(--bd);border-radius:14px;padding:14px;max-height:calc(100vh - 48px);overflow:auto}
+    .side-title{font-size:12px;color:var(--mu);margin:4px 0 10px}
+    .side-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;color:var(--mu);font-size:12px;text-decoration:none;border:1px solid transparent;cursor:pointer;transition:.15s;background:var(--s1)}
+    .side-item:hover{background:var(--s2);border-color:var(--bd);color:var(--tx)}
+    .side-item.active{background:rgba(200,169,126,.12);border-color:var(--ac);color:var(--ac)}
+    .content{display:flex;flex-direction:column;gap:14px}
     .btn-p{background:var(--ac);color:#1a0f00}
     .btn-s{background:var(--s2);color:var(--tx);border:1px solid var(--bd)}
     .card{background:var(--s1);border:1px solid var(--bd);border-radius:14px;padding:18px;margin-bottom:14px}
+    .section-card{display:none}
+    .section-card.active{display:block}
+    .group-card{background:transparent;border:none;padding:0;margin:0}
+    .group-head{font-size:14px;font-weight:600;color:var(--ac);margin:4px 0 10px}
+    .group-body{display:flex;flex-direction:column;gap:0}
     .ct{font-size:12px;font-weight:600;color:var(--ac);margin-bottom:12px}
     .fg{display:flex;flex-direction:column;gap:4px}
     .fr{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
@@ -51,8 +63,21 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="ct">⬆️ 数据上传</div>
+    <div class="layout">
+      <div class="sidebar">
+        <div class="side-title">功能导航</div>
+        <button class="side-item active" data-target="group_data">📥 数据接入</button>
+        <button class="side-item" data-target="group_rules">🧠 业务规则</button>
+        <button class="side-item" data-target="group_display">🖥️ 前台展示</button>
+        <button class="side-item" data-target="group_system">🛠️ 系统资源</button>
+      </div>
+
+      <div class="content">
+        <div class="group-card section-card" id="group_data">
+          <div class="group-head">📥 数据接入</div>
+          <div class="group-body">
+        <div class="card" id="section_upload">
+          <div class="ct">⬆️ 数据上传</div>
       <div class="fg" style="margin-bottom:10px">
         <label>Excel 文件（.xls/.xlsx）</label>
         <input class="inp" type="file" id="perfFile" accept=".xls,.xlsx" style="padding:6px">
@@ -68,8 +93,8 @@
 
     </div>
 
-    <div class="card">
-      <div class="ct">🔍 数据规范检查</div>
+        <div class="card" id="section_check">
+          <div class="ct">🔍 数据规范检查</div>
       <div style="font-size:11px;color:var(--mu);margin-bottom:12px">扫描数据库中已入库的全部记录，列出书写不规范的条目</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <button class="btn btn-p" onclick="runFormatCheck()">开始检查</button>
@@ -81,8 +106,8 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="ct">⚙️ Excel 列配置</div>
+        <div class="card" id="section_excel">
+          <div class="ct">⚙️ Excel 列配置</div>
       <div class="fr">
         <div class="fg">
           <label>日期列（字母，如 B）</label>
@@ -105,9 +130,14 @@
       </div>
       <button class="btn btn-s" style="margin-top:8px" onclick="savePerfExcelCfg()">保存配置</button>
     </div>
+          </div>
+        </div>
 
-    <div class="card">
-      <div class="ct">👥 人员管理</div>
+        <div class="group-card section-card" id="group_rules">
+          <div class="group-head">🧠 业务规则</div>
+          <div class="group-body">
+        <div class="card" id="section_people">
+          <div class="ct">👥 人员管理</div>
       <div class="tags" id="perfPeopleTags" style="min-height:40px"></div>
       <div class="tag-add">
         <input class="inp" type="text" id="perfPersonInput" placeholder="新增人员..." style="flex:1">
@@ -118,16 +148,17 @@
       <button class="btn btn-s" style="margin-top:10px" onclick="savePerfPeople()">保存人员设置</button>
     </div>
 
-    <div class="card">
-      <div class="ct">🔖 自定义筛选项（关键词）</div>
+        <div class="card" id="section_filters">
+          <div class="ct">🔖 自定义筛选项（关键词）</div>
       <div class="fr">
         <div class="fg">
           <label>显示名称</label>
           <input class="inp" id="filterName" placeholder="建模">
         </div>
         <div class="fg">
-          <label>关键词（从任务描述匹配）</label>
-          <input class="inp" id="filterKeyword" placeholder="建模">
+          <label>关键词</label>
+          <input class="inp" id="filterKeyword" placeholder="建模，渲染，出图">
+          <div style="font-size:11px;color:var(--mu)">可输入多个关键词并用“，”中文逗号分隔，包含任一关键词即可匹配</div>
         </div>
         <div class="fg">
           <label>KPI 系数</label>
@@ -142,8 +173,82 @@
       <button class="btn btn-s" style="margin-top:8px" onclick="saveCustomFilters()">保存筛选项</button>
     </div>
 
-    <div class="card">
-      <div class="ct">📊 Chart.js 资源地址</div>
+        <div class="card" id="section_decimal">
+          <div class="ct">🔢 图表数据小数点位数</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">统一设置所有图表数据标签和数值的保留小数位数（0 = 整数）</div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <input class="inp" type="number" id="decimalPlaces" min="0" max="6" value="0" style="width:80px">
+        <span style="font-size:11px;color:var(--mu)">位小数</span>
+      </div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveDecimalPlaces()">保存小数位数</button>
+    </div>
+
+        <div class="card" id="section_target">
+          <div class="ct">🎯 自定义目标值（分层）</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">任务进度 = 任务总量 /（目标值 × 涉及人员数）。支持全局目标 + 按月份/人员/筛选项覆盖</div>
+      <div class="fr">
+        <div class="fg">
+          <label>全局目标值（默认）</label>
+          <input class="inp" type="number" id="targetValue" min="0" step="0.01" placeholder="例如 1200">
+        </div>
+      </div>
+      <div class="fr" style="margin-top:8px">
+        <div class="fg">
+          <label>按月份目标（每行：YYYY-MM=值）</label>
+          <textarea class="inp" id="targetByMonth" rows="4" placeholder="2026-03=1200&#10;2026-04=1500" style="resize:vertical"></textarea>
+        </div>
+        <div class="fg">
+          <label>按人员目标（每行：人员名=值）</label>
+          <textarea class="inp" id="targetByPerson" rows="4" placeholder="张三=800&#10;李四=900" style="resize:vertical"></textarea>
+        </div>
+      </div>
+      <div class="fg" style="margin-top:8px">
+        <label>按筛选项目标（每行：筛选项名称=值）</label>
+        <textarea class="inp" id="targetByFilter" rows="4" placeholder="建模=600&#10;车图=500" style="resize:vertical"></textarea>
+      </div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveTargetValue()">保存目标配置</button>
+    </div>
+          </div>
+        </div>
+
+        <div class="group-card section-card" id="group_display">
+          <div class="group-head">🖥️ 前台展示</div>
+          <div class="group-body">
+        <div class="card" id="section_module">
+          <div class="ct">🗂️ 前端模块顺序</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整前端各模块的显示顺序，保存后前台页面按此顺序排列</div>
+      <div id="moduleOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveModuleOrder()">保存模块顺序</button>
+    </div>
+
+        <div class="card" id="section_stats">
+          <div class="ct">📊 统计指标排序</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整顶部统计卡片的显示顺序</div>
+      <div id="statsOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveStatsOrder()">保存指标顺序</button>
+    </div>
+
+        <div class="card" id="section_theme">
+          <div class="ct">🎨 前端配色方案</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">设置前台默认使用的配色方案，访客可在前台右上角自行切换</div>
+      <div id="themePickerAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
+      <button class="btn btn-s" onclick="saveDefaultTheme()">保存默认配色</button>
+    </div>
+
+        <div class="card" id="section_titles">
+          <div class="ct">✏️ 模块与图表标题</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">自定义前台各模块和图表的显示名称，留空则使用默认值</div>
+      <div id="titleEditorList" style="display:flex;flex-direction:column;gap:8px"></div>
+      <button class="btn btn-s" style="margin-top:10px" onclick="saveTitles()">保存标题</button>
+    </div>
+          </div>
+        </div>
+
+        <div class="group-card section-card" id="group_system">
+          <div class="group-head">🛠️ 系统资源</div>
+          <div class="group-body">
+        <div class="card" id="section_chart">
+          <div class="ct">📊 Chart.js 资源地址</div>
       <div class="fg">
         <label>图表脚本 URL（用于前端加载 Chart.js）</label>
         <input class="inp" id="chartJsUrl" placeholder="https://cdn.staticfile.net/Chart.js/3.9.1/chart.min.js">
@@ -151,44 +256,8 @@
       <button class="btn btn-s" style="margin-top:8px" onclick="saveChartJsUrl()">保存 Chart.js 地址</button>
     </div>
 
-    <div class="card">
-      <div class="ct">🗂️ 前端模块顺序</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整前端各模块的显示顺序，保存后前台页面按此顺序排列</div>
-      <div id="moduleOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
-      <button class="btn btn-s" style="margin-top:10px" onclick="saveModuleOrder()">保存模块顺序</button>
-    </div>
-
-    <div class="card">
-      <div class="ct">📊 统计指标排序</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">拖拽调整顶部统计卡片的显示顺序</div>
-      <div id="statsOrderList" style="display:flex;flex-direction:column;gap:6px"></div>
-      <button class="btn btn-s" style="margin-top:10px" onclick="saveStatsOrder()">保存指标顺序</button>
-    </div>
-
-    <div class="card">
-      <div class="ct">🎨 前端配色方案</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">设置前台默认使用的配色方案，访客可在前台右上角自行切换</div>
-      <div id="themePickerAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
-      <button class="btn btn-s" onclick="saveDefaultTheme()">保存默认配色</button>
-    </div>
-
-    <div class="card">
-      <div class="ct">✏️ 模块与图表标题</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">自定义前台各模块和图表的显示名称，留空则使用默认值</div>
-      <div id="titleEditorList" style="display:flex;flex-direction:column;gap:8px"></div>
-      <button class="btn btn-s" style="margin-top:10px" onclick="saveTitles()">保存标题</button>
-    </div>
-
-    <div class="card">
-      <div class="ct">🔗 底部版权信息</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">可添加多条文本或链接，前台页面底部按顺序拼接显示</div>
-      <div id="footerItemList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
-      <button class="btn btn-s" onclick="addFooterItem()">＋ 新增条目</button>
-      <button class="btn btn-p" style="margin-left:8px" onclick="saveFooterItems()">保存底部信息</button>
-    </div>
-
-    <div class="card">
-      <div class="ct">🖼️ 网站图标（Favicon）</div>
+        <div class="card" id="section_favicon">
+          <div class="ct">🖼️ 网站图标（Favicon）</div>
       <div style="font-size:11px;color:var(--mu);margin-bottom:14px">支持本地上传（PNG / ICO / JPG / SVG 等）或填写外链 URL，本地上传后外链自动清空，反之亦然</div>
       <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px;min-width:80px">
@@ -215,15 +284,26 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="ct">🔢 图表数据小数点位数</div>
-      <div style="font-size:11px;color:var(--mu);margin-bottom:10px">统一设置所有图表数据标签和数值的保留小数位数（0 = 整数）</div>
-      <div style="display:flex;align-items:center;gap:12px">
-        <input class="inp" type="number" id="decimalPlaces" min="0" max="6" value="0" style="width:80px">
-        <span style="font-size:11px;color:var(--mu)">位小数</span>
-      </div>
-      <button class="btn btn-s" style="margin-top:10px" onclick="saveDecimalPlaces()">保存小数位数</button>
+        <div class="card" id="section_footer">
+          <div class="ct">🔗 底部版权信息</div>
+      <div style="font-size:11px;color:var(--mu);margin-bottom:12px">可添加多条文本或链接，前台页面底部按顺序拼接显示</div>
+      <div id="footerItemList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+      <button class="btn btn-s" onclick="addFooterItem()">＋ 新增条目</button>
+      <button class="btn btn-p" style="margin-left:8px" onclick="saveFooterItems()">保存底部信息</button>
     </div>
+
+        <div class="card" id="section_users">
+          <div class="ct">👤 账号管理</div>
+          <div style="font-size:11px;color:var(--mu);margin-bottom:10px">新增、修改、删除后台账号（至少保留一个账号）</div>
+          <div id="userList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+          <div class="fr">
+            <div class="fg"><label>用户名</label><input class="inp" id="newUsername" placeholder="new_admin"></div>
+            <div class="fg"><label>密码</label><input class="inp" id="newPassword" type="password" placeholder="至少4位"></div>
+          </div>
+          <button class="btn btn-s" style="margin-top:8px" onclick="createUser()">新增账号</button>
+        </div>
+          </div>
+        </div>
 
   </div>
 
@@ -239,6 +319,38 @@
     }
     function esc(s){return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
+    function switchSection(targetId) {
+      const sections = document.querySelectorAll('.section-card');
+      sections.forEach(sec => sec.classList.remove('active'));
+      const target = document.getElementById(targetId);
+      if (target) target.classList.add('active');
+
+      document.querySelectorAll('.side-item').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.querySelector(`.side-item[data-target="${targetId}"]`);
+      if (activeBtn) activeBtn.classList.add('active');
+
+      if (target) {
+        const top = target.getBoundingClientRect().top + window.pageYOffset - 16;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+    }
+
+    function initSidebarNav() {
+      const btns = document.querySelectorAll('.side-item');
+      if (!btns.length) return;
+      btns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const targetId = btn.getAttribute('data-target');
+          if (targetId) switchSection(targetId);
+        });
+      });
+      const first = document.querySelector('.side-item.active') || btns[0];
+      if (first) {
+        const targetId = first.getAttribute('data-target');
+        if (targetId) switchSection(targetId);
+      }
+    }
+
   function formatQty(v) {
     const n = Number(v);
     if (Number.isNaN(n)) return v ?? '';
@@ -248,31 +360,42 @@
     // ── 统计指标排序 ─────────────────────────────────────────
     const STAT_LABELS = {
       'total_kpi': '📈 任务总量（KPI）',
+      'task_progress': '🎯 任务进度',
       'forecast':  '🔮 当月预测 KPI',
       'people':    '👥 涉及人员',
       'days':      '📅 涉及天数',
+      'absent_days': '🗓️ 员工未工作天数',
     };
-    const STAT_KEYS = ['total_kpi', 'forecast', 'people', 'days'];
+    const STAT_KEYS = ['total_kpi', 'task_progress', 'forecast', 'people', 'days', 'absent_days'];
     let _sStatDragSrc = null;
 
     function renderStatsOrder() {
       const order = (_perfCfg.app || {}).stats_order || STAT_KEYS;
+      const hidden = new Set((_perfCfg.app || {}).hidden_stats || []);
       const fullOrder = [...order];
       STAT_KEYS.forEach(k => { if (!fullOrder.includes(k)) fullOrder.push(k); });
       const wrap = document.getElementById('statsOrderList');
       if (!wrap) return;
-      wrap.innerHTML = fullOrder.map((key, idx) => `
-        <div class="module-item" draggable="true" data-key="${key}"
+      wrap.innerHTML = fullOrder.map((key, idx) => {
+        const isHidden = hidden.has(key);
+        return `
+        <div class="module-item" draggable="true" data-key="${key}" data-hidden="${isHidden ? '1' : '0'}"
           style="display:flex;align-items:center;gap:10px;padding:9px 12px;
             background:var(--s2);border:1px solid var(--bd);border-radius:9px;
-            cursor:grab;user-select:none;transition:opacity .15s"
+            cursor:grab;user-select:none;transition:opacity .15s;opacity:${isHidden ? '0.45' : '1'}"
           ondragstart="onSDragStart(event)" ondragover="onSDragOver(event)"
           ondrop="onSDrop(event)" ondragend="onSDragEnd(event)">
           <span style="color:var(--mu);font-size:14px">☰</span>
           <span style="font-size:13px;color:var(--ac);min-width:20px;font-weight:600">${idx + 1}</span>
-          <span style="font-size:12px">${STAT_LABELS[key] || key}</span>
-        </div>
-      `).join('');
+          <span style="font-size:12px;flex:1">${STAT_LABELS[key] || key}</span>
+          <button onclick="toggleStatVisible('${key}', event)"
+            style="background:none;border:1px solid var(--bd);border-radius:6px;
+              padding:2px 8px;cursor:pointer;font-size:13px;color:${isHidden ? 'var(--mu)' : 'var(--ac)'};
+              transition:color .15s" title="${isHidden ? '已隐藏，点击显示' : '点击隐藏'}">
+            ${isHidden ? '🙈' : '👁'}
+          </button>
+        </div>`;
+      }).join('');
     }
 
     function onSDragStart(e) { _sStatDragSrc = e.currentTarget; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.style.opacity = '0.4'; }
@@ -291,28 +414,40 @@
     }
     function onSDragEnd(e) { e.currentTarget.style.opacity = ''; _sStatDragSrc = null; }
 
+    function toggleStatVisible(key, e) {
+      e.stopPropagation();
+      if (!_perfCfg.app) _perfCfg.app = {};
+      const hidden = new Set(_perfCfg.app.hidden_stats || []);
+      if (hidden.has(key)) hidden.delete(key); else hidden.add(key);
+      _perfCfg.app.hidden_stats = [...hidden];
+      renderStatsOrder();
+    }
+
     async function saveStatsOrder() {
       const wrap = document.getElementById('statsOrderList');
       const order = Array.from(wrap.children).map(el => el.dataset.key);
       if (!_perfCfg.app) _perfCfg.app = {};
       _perfCfg.app.stats_order = order;
+      const hiddenStats = _perfCfg.app.hidden_stats || [];
       const res = await fetch('/admin/performance/config', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app: { stats_order: order } })
+        body: JSON.stringify({ app: { stats_order: order, hidden_stats: hiddenStats } })
       });
       if (res.ok) toast('指标顺序已保存'); else toast('保存失败', 'err');
     }
     // ─────────────────────────────────────────────────────────
 
     const MODULE_LABELS = {
+      'stats_panel':    '📊 顶部统计指标区',
       'kpi_trend':      '📈 KPI 总量趋势',
+      'insight':        '🧭 趋势解读',
       'filter_stats':   '📌 自定义筛选项 KPI 总览',
       'client_kpi':     '🏢 甲方 KPI 走势',
       'person_compare': '👤 人员 KPI 对比',
       'daily_charts':   '📅 每日/月度/人员图表',
       'detail_table':   '📋 明细表'
     };
-    const MODULE_KEYS = ['kpi_trend', 'filter_stats', 'client_kpi', 'person_compare', 'daily_charts', 'detail_table'];
+    const MODULE_KEYS = ['stats_panel', 'kpi_trend', 'insight', 'filter_stats', 'client_kpi', 'person_compare', 'daily_charts', 'detail_table'];
 
     let _dragSrc = null;
 
@@ -432,6 +567,11 @@
       document.getElementById('perfPeopleNames').value = (excel.people_names || []).join(',');
       document.getElementById('chartJsUrl').value = (_perfCfg.app || {}).chart_js_url || '';
       document.getElementById('decimalPlaces').value = (_perfCfg.app || {}).decimal_places ?? 0;
+      const tcfg = (_perfCfg.app || {}).target_config || {};
+      document.getElementById('targetValue').value = tcfg.global ?? (_perfCfg.app || {}).target_value ?? '';
+      document.getElementById('targetByMonth').value = Object.entries(tcfg.by_month || {}).map(([k,v]) => `${k}=${v}`).join('\n');
+      document.getElementById('targetByPerson').value = Object.entries(tcfg.by_person || {}).map(([k,v]) => `${k}=${v}`).join('\n');
+      document.getElementById('targetByFilter').value = Object.entries(tcfg.by_filter || {}).map(([k,v]) => `${k}=${v}`).join('\n');
       // 初始化当前选中主题（只在加载时设，之后由 selectAdminTheme 更新）
       _selectedAdminTheme = (_perfCfg.app || {}).default_theme || 'dark';
       renderPerfPeople();
@@ -950,6 +1090,41 @@
       toast('小数位数已保存');
     }
 
+    function parseTargetTextMap(text) {
+      const out = {};
+      String(text || '').split(/\r?\n/).forEach(line => {
+        const s = line.trim();
+        if (!s) return;
+        const idx = s.indexOf('=');
+        if (idx <= 0) return;
+        const k = s.slice(0, idx).trim();
+        const v = Number(s.slice(idx + 1).trim());
+        if (!k || Number.isNaN(v) || v <= 0) return;
+        out[k] = v;
+      });
+      return out;
+    }
+
+    async function saveTargetValue() {
+      const rawGlobal = document.getElementById('targetValue').value;
+      const nGlobal = Number(rawGlobal);
+      const byMonth = parseTargetTextMap(document.getElementById('targetByMonth').value);
+      const byPerson = parseTargetTextMap(document.getElementById('targetByPerson').value);
+      const byFilter = parseTargetTextMap(document.getElementById('targetByFilter').value);
+
+      if (!_perfCfg.app) _perfCfg.app = {};
+      const globalVal = (!rawGlobal || Number.isNaN(nGlobal) || nGlobal <= 0) ? null : nGlobal;
+      _perfCfg.app.target_value = globalVal; // 兼容旧字段
+      _perfCfg.app.target_config = {
+        global: globalVal,
+        by_month: byMonth,
+        by_person: byPerson,
+        by_filter: byFilter
+      };
+      await _saveAppCfg();
+      toast('目标配置已保存');
+    }
+
     // ── 通用保存app配置 ──────────────────────────────────────
     async function _saveAppCfg() {
       const res = await fetch('/admin/performance/config', {
@@ -972,6 +1147,7 @@
     }
 
     loadPerformanceAdmin();
+    initSidebarNav();
   </script>
 </body>
 </html>
