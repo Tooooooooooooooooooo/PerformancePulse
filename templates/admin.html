@@ -172,11 +172,6 @@
           <label>显示名称</label>
           <input class="inp" id="filterName" placeholder="建模">
         </div>
-        <div class="fg" style="flex:2">
-          <label>关键词</label>
-          <input class="inp" id="filterKeyword" placeholder="建模，渲染，出图">
-          <div style="font-size:11px;color:var(--mu);margin-top:3px" id="filterKeywordHint">多个关键词用逗号分隔，包含任一即匹配</div>
-        </div>
         <div class="fg">
           <label>匹配模式</label>
           <select class="inp" id="filterMatchMode" onchange="updateFilterHint()">
@@ -184,6 +179,11 @@
             <option value="exact">精确</option>
             <option value="regex">正则</option>
           </select>
+        </div>
+        <div class="fg" style="flex:2">
+          <label>关键词</label>
+          <input class="inp" id="filterKeyword" placeholder="建模，渲染，出图">
+          <div style="font-size:11px;color:var(--mu);margin-top:3px" id="filterKeywordHint">多个关键词用逗号分隔，包含任一即匹配</div>
         </div>
         <div class="fg" style="flex:2">
           <label>排除词 <span style="font-size:11px;color:var(--mu)">(可选)</span></label>
@@ -205,12 +205,12 @@
       <!-- 未命中记录表 -->
       <div id="unmatchedWrap" style="margin-top:20px;display:none">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-          <span style="font-size:13px;font-weight:600;color:var(--tx)">⚠️ 未被任何筛选规则命中的记录</span>
+          <span style="font-size:13px;font-weight:600;color:var(--tx)">⚠️ 筛选规则命中检查</span>
           <span id="unmatchedBadge" style="background:rgba(224,92,92,.18);color:#e05c5c;border:1px solid rgba(224,92,92,.35);border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700"></span>
-          <button class="btn btn-s" onclick="exportUnmatched()" style="font-size:11px">⬇ 导出</button>
+          <button class="btn btn-s" onclick="exportUnmatched()" style="font-size:11px">⬇ 导出未命中</button>
           <input id="unmatchedSearch" class="inp" placeholder="搜索任务描述 / 人员 / 甲方…" oninput="renderUnmatched()" style="flex:1;min-width:160px;max-width:280px;font-size:12px;padding:4px 8px">
         </div>
-        <div style="font-size:11px;color:var(--mu);margin-bottom:8px">这些记录的数量<b>不会被计入 KPI 统计</b>，请检查是否需要补充筛选规则</div>
+        <div id="ruleHintBox" style="font-size:11px;color:var(--mu);margin-bottom:8px;display:flex;flex-direction:column;gap:6px"></div>
         <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--bd)">
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead>
@@ -712,30 +712,32 @@
         wrap.innerHTML = '<div style="font-size:12px;color:var(--mu)">暂无自定义筛选项</div>';
         return;
       }
-      const modeLabel = {contains:'包含',exact:'精确',regex:'正则'};
       wrap.innerHTML = list.map((f, idx) => `
         <div class="cf-item" draggable="true" data-idx="${idx}"
           ondragstart="onFDragStart(event)" ondragover="onFDragOver(event)"
           ondrop="onFDrop(event)" ondragend="onFDragEnd(event)"
-          style="display:flex;flex-direction:column;gap:6px;
+          style="display:flex;flex-direction:column;gap:5px;
             padding:8px 10px;border-radius:10px;border:1px solid var(--bd);background:var(--s2);transition:border-color .12s,background .12s">
-          <div style="display:grid;grid-template-columns:18px 1fr 1.5fr 90px auto;gap:8px;align-items:center">
+          <!-- 第一行：☰ 名称 - 模式 - 关键词 - KPI系数 - 启用 - 删除 -->
+          <div style="display:grid;grid-template-columns:18px 1fr 100px 1.5fr 72px auto auto;gap:6px;align-items:center">
             <span style="color:var(--mu);cursor:grab;text-align:center;font-size:13px;user-select:none">☰</span>
-            <input class="inp" data-f="name"    value="${esc(f.name    || '')}" placeholder="名称" oninput="syncCF(this)" title="显示名称">
-            <input class="inp" data-f="keyword" value="${esc(f.keyword || '')}" placeholder="关键词" oninput="syncCF(this)" title="关键词（逗号分隔）">
-            <input class="inp" data-f="kpi"     value="${f.kpi ?? 1}"           oninput="syncCF(this)" style="width:100%" title="KPI系数">
-            <label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer;white-space:nowrap">
+            <input class="inp" data-f="name"       value="${esc(f.name    || '')}" placeholder="显示名称" oninput="syncCF(this)" title="显示名称">
+            <select class="inp" data-f="match_mode" onchange="syncCF(this)" style="font-size:12px" title="匹配模式">
+              <option value="contains" ${(f.match_mode||'contains')==='contains'?'selected':''}>📎 包含</option>
+              <option value="exact"    ${(f.match_mode||'')==='exact'   ?'selected':''}>🎯 精确</option>
+              <option value="regex"    ${(f.match_mode||'')==='regex'   ?'selected':''}>🔣 正则</option>
+            </select>
+            <input class="inp" data-f="keyword"    value="${esc(f.keyword || '')}" placeholder="关键词（逗号分隔）" oninput="syncCF(this)" title="关键词">
+            <input class="inp" data-f="kpi"        value="${f.kpi ?? 1}"           oninput="syncCF(this)" style="width:100%" title="KPI系数" placeholder="系数">
+            <label style="display:flex;gap:4px;align-items:center;font-size:12px;cursor:pointer;white-space:nowrap">
               <input type="checkbox" data-f="enabled" ${f.enabled ? 'checked' : ''} onchange="syncCF(this)">启用
             </label>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center;padding-left:26px">
-            <select class="inp" data-f="match_mode" onchange="syncCF(this)" style="font-size:12px" title="匹配模式">
-              <option value="contains" ${(f.match_mode||'contains')==='contains'?'selected':''}>📎 包含匹配</option>
-              <option value="exact"    ${(f.match_mode||'')==='exact'   ?'selected':''}>🎯 精确匹配</option>
-              <option value="regex"    ${(f.match_mode||'')==='regex'   ?'selected':''}>🔣 正则匹配</option>
-            </select>
-            <input class="inp" data-f="excludes" value="${esc(f.excludes || '')}" placeholder="排除词（如：非SKU，草稿）" oninput="syncCF(this)" style="font-size:12px" title="排除词，命中则跳过">
             <button class="btn btn-s" onclick="removeCustomFilter(${idx})" style="white-space:nowrap">删除</button>
+          </div>
+          <!-- 第二行：排除词（缩进对齐内容区）-->
+          <div style="display:flex;align-items:center;gap:6px;padding-left:26px">
+            <span style="font-size:11px;color:var(--mu);white-space:nowrap;flex-shrink:0">排除词</span>
+            <input class="inp" data-f="excludes" value="${esc(f.excludes || '')}" placeholder="命中则跳过，多个用逗号分隔（如：非SKU，草稿）" oninput="syncCF(this)" style="font-size:12px;flex:1" title="排除词">
           </div>
         </div>
       `).join('');
@@ -852,6 +854,9 @@
 
     // ── 未命中记录表 ─────────────────────────────────────────
     let _unmatchedAll  = [];  // 全量数据
+    let _conflictAll   = [];  // 同一条记录命中多个规则
+    let _neverHitAll   = [];  // 从未命中的筛选项
+    let _uncoveredAll  = [];  // 从未被命中的人员
     let _unmatchedPage = 1;
     const _unmatchedPageSize = 50;
 
@@ -865,10 +870,42 @@
         if (!res.ok) return;
         const data = await res.json();
         _unmatchedAll  = data.unmatched_records || [];
+        _conflictAll   = data.conflict_records || [];
+        _neverHitAll   = data.never_hit_filters || [];
+        _uncoveredAll  = data.uncovered_people || [];
         _unmatchedPage = 1;
-        wrap.style.display = _unmatchedAll.length ? '' : 'none';
+
+        const hasAnyIssue = _unmatchedAll.length || _conflictAll.length || _neverHitAll.length || _uncoveredAll.length;
+        wrap.style.display = hasAnyIssue ? '' : 'none';
+
         const badge = document.getElementById('unmatchedBadge');
-        badge.textContent = _unmatchedAll.length + ' 条';
+        badge.textContent = `未命中 ${_unmatchedAll.length} 条 / 多命中 ${_conflictAll.length} 条`;
+
+        const hintBox = document.getElementById('ruleHintBox');
+        if (hintBox) {
+          const lines = [];
+          lines.push(`<div>未命中记录数量 <b>${_unmatchedAll.length}</b>，这些记录的数量<b>不会被计入 KPI 统计</b>。</div>`);
+          if (_conflictAll.length) {
+            const examples = _conflictAll.slice(0, 8).map(r => {
+              const p = esc(r.person || '');
+              const d = esc(r.date || '');
+              const t = esc(r.task_desc || '');
+              const ms = esc((r.matched_filters || []).join(' / '));
+              return `<li><span style="color:var(--ac)">${p}</span> ${d}：${t}（命中：${ms}）</li>`;
+            }).join('');
+            lines.push(`<div style="color:#f7b267">同一条记录命中多个规则：<b>${_conflictAll.length}</b> 条</div><ul style="margin:4px 0 0 18px;padding:0">${examples}</ul>`);
+          }
+          if (_neverHitAll.length) {
+            const tags = _neverHitAll.map(f => `<span style="display:inline-block;padding:2px 8px;border:1px solid var(--bd);border-radius:999px;margin:0 6px 6px 0">${esc(f.name || f.keyword || '未命名规则')}</span>`).join('');
+            lines.push(`<div style="color:#9ad29a">从未命中过任何项目的规则：<b>${_neverHitAll.length}</b> 个</div><div>${tags}</div>`);
+          }
+          if (_uncoveredAll.length) {
+            const people = _uncoveredAll.map(p => `<span style="display:inline-block;padding:2px 8px;border:1px solid var(--bd);border-radius:999px;margin:0 6px 6px 0">${esc(p)}</span>`).join('');
+            lines.push(`<div style="color:#e8c27f">从未被命中的人员：<b>${_uncoveredAll.length}</b> 人</div><div>${people}</div>`);
+          }
+          hintBox.innerHTML = lines.join('');
+        }
+
         renderUnmatched();
       } catch(e) { /* silent */ }
     }

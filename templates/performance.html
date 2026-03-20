@@ -181,7 +181,7 @@
     <!-- 月度/人员任务量/人员KPI占比图表 -->
     <div class="charts" id="dailyChartsBlock" style="margin-bottom:14px">
       <div class="chart-card">
-        <div class="chart-title" id="ctMonthChart">月度任务量</div>
+        <div class="chart-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span id="ctMonthChart">月度任务量</span><span id="monthProgressBadge" style="display:none;font-size:11px;font-weight:600;background:rgba(92,184,92,.15);color:#5cb85c;border:1px solid rgba(92,184,92,.4);border-radius:10px;padding:1px 8px;white-space:nowrap"></span></div>
         <canvas class="chart-wrap" id="chartMonth"></canvas>
       </div>
       <div class="chart-card">
@@ -1635,7 +1635,86 @@
       chartPerson && chartPerson.destroy();
       chartPersonKpiPie && chartPersonKpiPie.destroy();
 
-      chartMonth = new Chart(document.getElementById('chartMonth'), chartConfig(byMonth.map(i=>fmtDateLabel(i.label)), byMonth.map(i=>i.value), '数量', 'rgba(124,106,245,.55)', drillByMonth));
+      // ── 按月完成度数据（仅用于柱状上的完成度标注） ───────────────
+      const _tCfg      = ((personFilterData || perfData).insights || {}).target || {};
+      const _targetCfg = _tCfg.config || {};
+      const _globalTgt = Number(_tCfg.value || 0);
+      const _byMonthTgt = _targetCfg.by_month || {};
+
+      const _monthRecords = (personFilterData || perfData).records || [];
+      const _peopleByMonth = {};
+      _monthRecords.forEach(r => {
+        if (!r.month) return;
+        if (!_peopleByMonth[r.month]) _peopleByMonth[r.month] = new Set();
+        _peopleByMonth[r.month].add(r.person);
+      });
+
+      const _kpiByMonth = {};
+      byMonth.forEach(item => { _kpiByMonth[item.label] = Number(item.value) || 0; });
+
+      const _monthProgress = {};
+      byMonth.forEach(item => {
+        const mon = item.label;
+        const kpi = _kpiByMonth[mon] || 0;
+        const tgt = Number(_byMonthTgt[mon] || _globalTgt || 0);
+        const ppl = (_peopleByMonth[mon] || new Set()).size || 1;
+        if (tgt > 0) _monthProgress[mon] = kpi / (tgt * ppl);
+      });
+
+      const monthProgressPlugin = {
+        id: 'monthProgressPlugin',
+        afterDatasetsDraw(chart) {
+          if (!Object.keys(_monthProgress).length) return;
+          const { ctx } = chart;
+          ctx.save();
+          chart.data.datasets.forEach((dataset, di) => {
+            const meta = chart.getDatasetMeta(di);
+            meta.data.forEach((bar, idx) => {
+              const rawLabel = byMonth[idx] ? byMonth[idx].label : null;
+              if (!rawLabel || _monthProgress[rawLabel] === undefined) return;
+              const pct = _monthProgress[rawLabel];
+              const pctStr = (pct * 100).toFixed(1) + '%';
+              const color = pct >= 1 ? '#5cb85c' : pct >= 0.7 ? '#f0a030' : '#e05c5c';
+              const pos = bar.tooltipPosition();
+
+              const pad = 5;
+              const th = 14;
+              const tw = ctx.measureText(pctStr).width + pad * 2;
+              const bx = pos.x - tw / 2;
+              const by = pos.y - th - 22;
+              ctx.fillStyle = color + '33';
+              ctx.strokeStyle = color + '99';
+              ctx.lineWidth = 1;
+              const r = th / 2;
+              ctx.beginPath();
+              ctx.moveTo(bx + r, by);
+              ctx.lineTo(bx + tw - r, by);
+              ctx.arcTo(bx + tw, by, bx + tw, by + r, r);
+              ctx.lineTo(bx + tw, by + th - r);
+              ctx.arcTo(bx + tw, by + th, bx + tw - r, by + th, r);
+              ctx.lineTo(bx + r, by + th);
+              ctx.arcTo(bx, by + th, bx, by + th - r, r);
+              ctx.lineTo(bx, by + r);
+              ctx.arcTo(bx, by, bx + r, by, r);
+              ctx.closePath();
+              ctx.fill();
+              ctx.stroke();
+
+              ctx.fillStyle = color;
+              ctx.font = 'bold 9px Noto Sans SC,sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(pctStr, pos.x, by + th / 2);
+            });
+          });
+          ctx.restore();
+        }
+      };
+
+      const _monthCfg = chartConfig(byMonth.map(i=>fmtDateLabel(i.label)), byMonth.map(i=>i.value), '数量', 'rgba(124,106,245,.55)', drillByMonth);
+      _monthCfg.options.layout.padding.top = 48;
+      _monthCfg.plugins = [valueLabelPlugin, monthProgressPlugin];
+      chartMonth = new Chart(document.getElementById('chartMonth'), _monthCfg);
       chartPerson = new Chart(document.getElementById('chartPerson'), chartConfig(byPerson.map(i=>i.label), byPerson.map(i=>i.value), '数量', 'rgba(92,184,92,.55)', drillByPerson));
 
       // 人员KPI占比饼图：受时间筛选、不受人员筛选
